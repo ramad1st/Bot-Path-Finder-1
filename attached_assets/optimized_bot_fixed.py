@@ -1402,16 +1402,6 @@ def _beam_search(
     if pool:
         pool.sort(key=lambda x: x[0], reverse=True)
 
-        use_mc = False
-        if len(pool) >= 2:
-            top_score = pool[0][0]
-            second_score = pool[1][0]
-            diff = abs(top_score - second_score)
-            scale = max(abs(top_score), abs(second_score), 1.0)
-            margin = diff / scale
-            if pile_size <= 160 and margin < 0.12:
-                use_mc = True
-
         top_n = min(6, len(pool))
         top_items = pool[:top_n]
         reaches = []
