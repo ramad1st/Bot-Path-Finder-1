@@ -10,14 +10,16 @@ Key optimizations over the original:
 6. Reduced memory allocations in hot loops
 
 Bug fixes (v2):
-FIX-1: _assess_post_move — "held>=5 and no finish_next" no longer hard-rejects;
-        replaced with large penalty so the bot keeps moving instead of freezing.
-FIX-2: _assess_post_move — pair-without-visible-third only hard-rejects when the
-        type is completely absent from the board; if it exists but is buried,
-        applies a penalty instead so the bot can uncover it.
-FIX-3: _beam_search Phase 3 — emergency fallback: when ALL moves are rejected by
-        the evaluator but available moves still exist, pick the best non-lethal
-        move (won't cause held>=7 or dead_pair). Eliminates spurious bot freezes.
+FIX-3: _beam_search Phase 3 — smart tiered emergency fallback.
+        When ALL normal + risky_fallback moves are rejected but available moves
+        still exist on the board, the bot no longer freezes.
+        Priority tiers (safest first):
+          T1 — immediate match (always safe, clears hand space)
+          T2 — finish_next=True after pick (guaranteed escape next step)
+          T3 — held stays <=4 (safe zone, max unlocks wins tie)
+          T4 — last resort: penalises held>=5 heavily so 6/7 is chosen
+               only when literally nothing else exists.
+        Hard exclusions in all tiers: dead_pair or held>=7.
 """
 from __future__ import annotations
 
@@ -532,20 +534,14 @@ def _assess_post_move(
     btype = ix.btype[idx]
     block_count_after = new_held.get(btype, 0)
 
-    # ---- penalties / bonuses ----
-    penalty = 0.0
-
     if matched is None and new_size >= 5 and not finish_next:
-        # FIX: بدل الرفض التام، نضيف عقوبة ضخمة — الرفض التام كان يوقف البوت
-        penalty -= 8000.0 * (new_size - 4)
+        return False, 0.0, analysis
 
     if matched is None and block_count_after == 2 and btype not in avail_finish_types:
-        # FIX: تحقق إذا النوع موجود في أي مكان على اللوح (حتى مدفون) وليس فقط متاح
-        type_exists_on_board = bool(new_pile & _level_idx.type_mask.get(btype, 0))  # type: ignore[union-attr]
-        if not type_exists_on_board:
-            return False, 0.0, analysis
-        # موجود لكن مدفون — عقوبة كبيرة بدل رفض تام
-        penalty -= 4500.0
+        return False, 0.0, analysis
+
+    # ---- penalties / bonuses ----
+    penalty = 0.0
 
     if analysis["dead_single_types"]:
         penalty -= 1800.0 * len(analysis["dead_single_types"])
@@ -805,33 +801,67 @@ def _beam_search(
         logger.warning("[BOT] كل الخيارات فيها dead single — fallback")
         return risky_fallback[0][1], "ok"
 
-    # ---- Phase 3: Emergency fallback — FIX الأساسي لمشكلة التوقف ----
-    # إذا رُفضت كل الحركات بالتقييم لكن لا تزال توجد بلوكات متاحة،
-    # نختار أفضل حركة لا تقتل اللعبة مباشرة (held < 7)
-    emergency: list[tuple[float, int]] = []
+    # ---- Phase 3: Emergency fallback — FIX-3 ذكي ومتدرج ----
+    # يُفعَّل فقط عندما ترفض كل الفلاتر الاعتيادية جميع الحركات
+    # لكن لا تزال توجد بلوكات متاحة على اللوح.
+    # الأولوية: ماتش فوري → مخرج في الخطوة التالية → أعلى unlock → أقل ضرر
+    tier1: list[tuple[float, int]] = []   # ماتش فوري
+    tier2: list[tuple[float, int]] = []   # finish_next = True بعد الحركة
+    tier3: list[tuple[float, int]] = []   # held يبقى <= 4 وعالي الـ unlock
+    tier4: list[tuple[float, int]] = []   # أي حركة لا تقتل فوراً
+
     for i in ix.iter_bits(avail):
         new_pile_e, new_held_e, new_size_e, matched_e = _simulate_pick(pile, held, held_size, i)
+
+        # استبعاد صارم: موت مباشر أو خسارة مؤكدة
         if new_size_e >= 7:
-            continue  # موت مباشر — تجاهل
+            continue
         remaining_e = _get_pile_type_counts(new_pile_e)
         analysis_e = _analyze_held(new_held_e, remaining_e)
         if analysis_e["dead_pair_types"]:
-            continue  # خسارة مؤكدة — تجاهل
+            continue
 
-        s = _score_state(new_pile_e, new_held_e, new_size_e)
+        unlocks_e  = _get_unlocks(pile, i)
+        layer_e    = ix.layer[i]
+        depth_e    = _get_depth_below(pile, i)
+        base_score = unlocks_e * 200 + layer_e * 150 + depth_e * 100
+
         if matched_e is not None:
-            s += 7000
-        s += _get_unlocks(pile, i) * 200
-        s += ix.layer[i] * 150
-        s += _get_depth_below(pile, i) * 100
-        emergency.append((s, i))
+            # Tier 1: ماتش فوري — دائماً آمن
+            tier1.append((base_score + _score_state(new_pile_e, new_held_e, new_size_e), i))
+            continue
 
-    if emergency:
-        emergency.sort(key=lambda x: x[0], reverse=True)
-        logger.warning(
-            f"[BOT] طارئ: كل الخيارات رُفضت — اخترنا الأفضل من {len(emergency)} خيار"
+        # هل يوجد مخرج بعد هذه الحركة؟
+        avail_after_e = _get_available(new_pile_e)
+        finish_next_e = any(
+            _will_complete(ix.btype[j], new_held_e)
+            for j in ix.iter_bits(avail_after_e)
         )
-        return emergency[0][1], "ok"
+
+        if finish_next_e:
+            # Tier 2: يمكننا إكمال ثلاثية في الخطوة القادمة
+            tier2.append((base_score, i))
+            continue
+
+        if new_size_e <= 4:
+            # Tier 3: اليد آمنة (<=4) — لا خطر وشيك
+            tier3.append((base_score, i))
+            continue
+
+        # Tier 4: آخر ملجأ — لا نصل لـ 6+ إلا مضطرين
+        # عقوبة على الارتفاع في اليد حتى لا نختار 5/6 بدون سبب
+        penalty_e = (new_size_e - 4) * 3000
+        tier4.append((base_score - penalty_e, i))
+
+    for tier_name, tier in [("T1-ماتش", tier1), ("T2-مخرج_قادم", tier2),
+                              ("T3-يد_آمنة", tier3), ("T4-أخير", tier4)]:
+        if tier:
+            tier.sort(key=lambda x: x[0], reverse=True)
+            logger.warning(
+                f"[BOT] طارئ [{tier_name}]: اخترنا الأفضل من {len(tier)} خيار "
+                f"(يد={held_size}/7 | باقي={_popcount(pile)})"
+            )
+            return tier[0][1], "ok"
 
     return None, "all_rejected_by_evaluation"
 
