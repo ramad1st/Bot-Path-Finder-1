@@ -1038,6 +1038,140 @@ def _mc_rollout(pile: int, held: dict[int, int], held_size: int,
     return steps
 
 
+def _apply_pick_raw(pile, held, held_size, idx):
+    """Apply a single pick: remove from pile, add to hand, auto-match if triple."""
+    ix = _level_idx
+    pile ^= ix.bit[idx]
+    bt = ix.btype[idx]
+    held = dict(held)
+    held[bt] = held.get(bt, 0) + 1
+    held_size += 1
+    if held[bt] >= 3:
+        held[bt] -= 3
+        if held[bt] == 0:
+            del held[bt]
+        held_size -= 3
+    return pile, held, held_size
+
+
+def _get_greedy_moves(pile, held, held_size):
+    """Get sorted candidate moves using tier logic. Returns list of block indices or empty."""
+    ix = _level_idx
+    _btype = ix.btype
+    _tmask = ix.type_mask
+
+    while True:
+        avail = _get_available(pile)
+        if avail == 0:
+            return [], pile, held, held_size
+        found = False
+        for i in ix.iter_bits(avail):
+            if held.get(_btype[i], 0) >= 2:
+                pile, held, held_size = _apply_pick_raw(pile, dict(held), held_size, i)
+                found = True
+                break
+        if not found:
+            break
+
+    avail = _get_available(pile)
+    if avail == 0:
+        return [], pile, held, held_size
+
+    tier1, tier2, tier3, tier4, tier5 = [], [], [], [], []
+    for i in ix.iter_bits(avail):
+        bt = _btype[i]
+        c = held.get(bt, 0)
+        tmask_bt = _tmask.get(bt, 0)
+        if c == 1:
+            if _popcount((pile ^ ix.bit[i]) & tmask_bt) == 0:
+                continue
+            if _popcount(avail & tmask_bt) - 1 > 0:
+                tier1.append(i)
+            else:
+                tier2.append(i)
+        elif c == 0:
+            if _popcount((pile ^ ix.bit[i]) & tmask_bt) < 2:
+                continue
+            ar = _popcount(avail & tmask_bt) - 1
+            if ar >= 2:
+                tier3.append(i)
+            elif ar >= 1:
+                tier4.append(i)
+            else:
+                tier5.append(i)
+
+    if held_size >= 6:
+        pool = tier1
+    elif held_size >= 5:
+        pool = tier1 or tier2
+    elif held_size >= 4:
+        pool = tier1 or tier2 or tier3
+    elif held_size >= 2:
+        pp = tier1 + tier2
+        pool = pp if pp else (tier3 + tier4)
+    else:
+        pool = tier1 + tier2 + tier3 + tier4 + tier5
+
+    if not pool and held_size <= 5:
+        for i in ix.iter_bits(avail):
+            bt_ch = _btype[i]
+            c_ch = held.get(bt_ch, 0)
+            br = _popcount((pile ^ ix.bit[i]) & _tmask.get(bt_ch, 0))
+            if c_ch == 1 and br == 0:
+                continue
+            if c_ch == 0 and br < 2:
+                continue
+            if c_ch + 1 >= 3 or held_size + 1 < 7:
+                pool.append(i)
+
+    if pool:
+        pool.sort(key=lambda i: ix.layer[i], reverse=True)
+    return pool, pile, held, held_size
+
+
+def _greedy_forward(pile, held, held_size, max_steps):
+    """Run greedy simulation forward, return step count."""
+    steps = 0
+    while steps < max_steps:
+        moves, p2, h2, hs2 = _get_greedy_moves(pile, dict(held), held_size)
+        if not moves:
+            break
+        pile, held, held_size = _apply_pick_raw(p2, h2, hs2, moves[0])
+        steps += 1
+    return steps
+
+
+def _bt_rollout(pile: int, held: dict[int, int], held_size: int,
+                max_steps: int = 80, bt_budget: int = 6, max_alts: int = 3) -> int:
+    """Greedy forward simulation with backtracking. Returns max steps achievable."""
+    path = []
+    p, h, hs = pile, dict(held), held_size
+
+    while len(path) < max_steps:
+        moves, p2, h2, hs2 = _get_greedy_moves(p, dict(h), hs)
+        if not moves:
+            break
+        path.append((p2, dict(h2), hs2, moves))
+        p, h, hs = _apply_pick_raw(p2, h2, hs2, moves[0])
+
+    greedy_len = len(path)
+    best = greedy_len
+
+    for bt_depth in range(1, min(bt_budget + 1, greedy_len + 1)):
+        bt_idx = greedy_len - bt_depth
+        bp, bh, bhs, bmoves = path[bt_idx]
+
+        for alt_i in range(1, min(max_alts + 1, len(bmoves))):
+            alt_m = bmoves[alt_i]
+            ap, ah, ahs = _apply_pick_raw(bp, dict(bh), bhs, alt_m)
+            sub = _greedy_forward(ap, ah, ahs, max_steps - bt_idx - 1)
+            total = bt_idx + 1 + sub
+            if total > best:
+                best = total
+
+    return best
+
+
 def _heuristic_rank(pile: int, held: dict[int, int], held_size: int,
                     i: int) -> float:
     ix = _level_idx  # type: ignore[union-attr]
@@ -1278,24 +1412,22 @@ def _beam_search(
             if pile_size <= 160 and margin < 0.12:
                 use_mc = True
 
-        if use_mc:
-            top_n = min(6, len(pool))
-            top_moves = [x[1] for x in pool[:top_n]]
-            sims_per = max(80, 600 // len(top_moves))
-            best_avg = -1.0
-            best_m = top_moves[0]
-            for m in top_moves:
-                np, nh, ns, _ = _simulate_pick(pile, held, held_size, m)
-                total = 0
-                random.seed(pile_size * 1000 + held_size * 100 + m)
-                for _ in range(sims_per):
-                    total += 1 + _mc_rollout(np, dict(nh), ns)
-                avg = total / sims_per
-                if avg > best_avg:
-                    best_avg = avg
-                    best_m = m
-            return best_m, "ok"
-        return pool[0][1], "ok"
+        top_n = min(6, len(pool))
+        top_items = pool[:top_n]
+        reaches = []
+        for _, m in top_items:
+            np, nh, ns, _ = _simulate_pick(pile, held, held_size, m)
+            reach = 1 + _bt_rollout(np, dict(nh), ns)
+            reaches.append((reach, m))
+
+        heur_pick = top_items[0][1]
+        heur_reach = next(r for r, m in reaches if m == heur_pick)
+        best_reach_val = max(r for r, _ in reaches)
+        best_reach_move = max(reaches, key=lambda x: x[0])[1]
+
+        if best_reach_val >= heur_reach + 5 and best_reach_move != heur_pick:
+            return best_reach_move, "ok"
+        return heur_pick, "ok"
 
     # ---- Phase 3: MCTS emergency fallback ----
     p3_result = _mcts_select(pile, held, held_size)
