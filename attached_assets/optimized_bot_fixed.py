@@ -1135,7 +1135,13 @@ def _beam_search(
                 pair_bonus = 8000 if stuck_types >= 3 else 3200
                 s += pair_bonus
             elif board_left_t:
-                s += 2500 if stuck_types >= 1 else 400
+                mb_for_pair = _min_blockers_for_type(new_pile, btype_i)
+                if mb_for_pair >= 3:
+                    s -= 5000
+                elif mb_for_pair >= 2:
+                    s += 400
+                else:
+                    s += 2500
             else:
                 s -= 3500
 
@@ -1159,12 +1165,18 @@ def _beam_search(
     pool = scored if scored else risky_fallback
     if pool:
         pool.sort(key=lambda x: x[0], reverse=True)
-        if len(pool) >= 2 and pile_size <= 160:
+        if len(pool) >= 2:
             top_score = pool[0][0]
             second_score = pool[1][0]
             margin = (top_score - second_score) / max(abs(top_score), 1) if top_score > 0 else 1.0
-            if margin < 0.12:
-                top_moves = [x[1] for x in pool[:min(4, len(pool))]]
+
+            use_mc = False
+            if pile_size <= 160 and margin < 0.12:
+                use_mc = True
+
+            if use_mc:
+                top_n = min(4, len(pool))
+                top_moves = [x[1] for x in pool[:top_n]]
                 sims_per = max(80, 400 // len(top_moves))
                 best_avg = -1.0
                 best_m = top_moves[0]
