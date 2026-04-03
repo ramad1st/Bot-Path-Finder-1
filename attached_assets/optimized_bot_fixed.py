@@ -406,6 +406,40 @@ def _finish_in_three(pile: int, held: dict[int, int], held_size: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
+#  Via-7/7 rescue path  — 3-step lookahead allowing full-hand match
+# ---------------------------------------------------------------------------
+
+def _has_via77_path(pile: int, held: dict[int, int], held_size: int) -> bool:
+    """هل يوجد تسلسل 3 خطوات يؤدي لماتش (يسمح بالمرور بـ 7/7 → ماتش فوري)؟"""
+    ix = _level_idx  # type: ignore[union-attr]
+    avail = _get_available(pile)
+    for j in ix.iter_bits(avail):
+        np1, nh1, ns1, m1 = _simulate_pick(pile, held, held_size, j)
+        if m1 is not None:
+            return True  # ماتش مباشر
+        if ns1 == 7:
+            # عند 7/7 — فحص ماتش فوري
+            for k in ix.iter_bits(_get_available(np1)):
+                _, _, ns1k, m1k = _simulate_pick(np1, nh1, ns1, k)
+                if m1k is not None and ns1k < 7:
+                    return True
+            continue
+        if ns1 > 7:
+            continue
+        for k in ix.iter_bits(_get_available(np1)):
+            np2, nh2, ns2, m2 = _simulate_pick(np1, nh1, ns1, k)
+            if m2 is not None:
+                return True
+            if ns2 == 7:
+                # عند 7/7 في العمق الثاني — فحص ماتش
+                for l in ix.iter_bits(_get_available(np2)):
+                    _, _, ns2l, m2l = _simulate_pick(np2, nh2, ns2, l)
+                    if m2l is not None and ns2l < 7:
+                        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
 #  Dependency-path helpers  (رسم مسار الكشف)
 # ---------------------------------------------------------------------------
 
@@ -534,7 +568,15 @@ def _score_state(pile: int, held: dict[int, int], held_size: int) -> float:
     if held_size >= 7:
         return -200000.0
     if held_size >= 6:
-        return -90000.0
+        # ميّز بين حالات 6/7: pair مع ثالثة متاحة أفضل بكثير من 6 أنواع مختلفة
+        avail_now = _get_avail_type_counts(pile)
+        completable = sum(1 for t, c in held.items() if c == 2 and avail_now.get(t, 0) > 0)
+        if completable > 0:
+            return -45000.0  # ماتش ممكن بالخطوة القادمة → أفضل 6/7
+        has_pair = any(c == 2 for c in held.values())
+        if has_pair:
+            return -70000.0  # pair موجود لكن الثالثة مدفونة → متوسط
+        return -90000.0      # كل أنواع مفردة عند 6/7 → أسوأ حالة
 
     score = 0.0
     remaining = _get_pile_type_counts(pile)
@@ -677,9 +719,12 @@ def _assess_post_move(
             if unc_rescue == 0:
                 return False, 0.0, analysis
 
+    if matched is None and new_size == 6 and is_pair_move and not finish_next:
+        return False, 0.0, analysis
+
     if matched is None and block_count_after == 2 and btype not in avail_finish_types:
         if not _finish_in_three(new_pile, new_held, new_size):
-            if new_size <= 5:
+            if new_size <= 6:
                 return False, 0.0, analysis
 
     # ---- penalties / bonuses ----
@@ -901,42 +946,84 @@ def _mc_rollout(pile: int, held: dict[int, int], held_size: int,
         if avail == 0:
             break
 
-        pair_moves: list[int] = []
-        other_moves: list[int] = []
+        # ---- نظام أولويات ذكي لاختيار المسار الأمثل ----
+        # Tier 1: pair → الثالثة متاحة الآن  (ماتش بخطوة واحدة)
+        # Tier 2: pair → الثالثة موجودة على اللوح  (ماتش قريب)
+        # Tier 3: نوع جديد ← 2+ كتل متاحة الآن  (يمكن تشكيل pair+match سريعاً)
+        # Tier 4: نوع جديد ← 1 كتلة متاحة الآن   (أبطأ، مقبول باليد الفارغة)
+        # Tier 5: نوع جديد ← الكتل مدفونة          (خطر، تجنب إلا اضطراراً)
         _tmask = ix.type_mask
+        tier1: list[int] = []
+        tier2: list[int] = []
+        tier3: list[int] = []
+        tier4: list[int] = []
+        tier5: list[int] = []
+
         for i in _iter(avail):
             bt = _btype[i]
             c = held.get(bt, 0)
-            if c == 1:
-                new_pile_chk = pile ^ _bit[i]
-                if (new_pile_chk & _tmask.get(bt, 0)) == 0:
-                    continue
-                pair_moves.append(i)
-            elif c == 0:
-                if held_size >= 5:
-                    new_pile_chk = pile ^ _bit[i]
-                    if _popcount(new_pile_chk & _tmask.get(bt, 0)) < 2:
-                        continue
-                other_moves.append(i)
+            tmask_bt = _tmask.get(bt, 0)
 
+            if c == 1:
+                # pair move: نتحقق وجود الثالثة
+                board_left = _popcount((pile ^ _bit[i]) & tmask_bt)
+                if board_left == 0:
+                    continue  # dead single, skip
+                # هل الثالثة متاحة الآن؟ نستخدم avail الموجود (بدون استدعاء إضافي)
+                third_now = _popcount(avail & tmask_bt) - 1  # -1 لأن i نفسه محسوب
+                if third_now > 0:
+                    tier1.append(i)
+                else:
+                    tier2.append(i)
+            elif c == 0:
+                # نوع جديد: نتحقق وجود كتلتين على الأقل على اللوح
+                board_rest = _popcount((pile ^ _bit[i]) & tmask_bt)
+                if board_rest < 2:
+                    continue  # لا يمكن إكمال الثلاثة
+                accessible_rest = _popcount(avail & tmask_bt) - 1  # عدد المتاحة الآن غير i
+                if accessible_rest >= 2:
+                    tier3.append(i)
+                elif accessible_rest >= 1:
+                    tier4.append(i)
+                else:
+                    tier5.append(i)
+
+        # ---- اختيار الـ pool حسب حجم اليد ----
         if held_size >= 6:
-            if pair_moves:
-                chosen = random.choice(pair_moves)
-            else:
-                break
+            pool = tier1
         elif held_size >= 5:
-            pool = pair_moves if pair_moves else other_moves
-            if not pool:
-                break
-            chosen = random.choice(pool)
+            pool = tier1 or tier2
+        elif held_size >= 4:
+            pool = tier1 or tier2 or tier3
+        elif held_size >= 2:
+            pairs_pool = tier1 + tier2
+            pool = pairs_pool if pairs_pool else (tier3 + tier4)
         else:
-            pool = pair_moves + other_moves
-            if not pool:
-                break
-            if pair_moves and random.random() < 0.5:
-                chosen = random.choice(pair_moves)
+            pool = tier1 + tier2 + tier3 + tier4 + tier5
+
+        if not pool:
+            if held_size <= 5:
+                all_avail_list = list(_iter(avail))
+                safe_pool = []
+                for i in all_avail_list:
+                    bt_ch = _btype[i]
+                    c_ch = held.get(bt_ch, 0)
+                    pile_after = pile ^ _bit[i]
+                    board_rest = _popcount(pile_after & _tmask.get(bt_ch, 0))
+                    if c_ch == 1 and board_rest == 0:
+                        continue
+                    if c_ch == 0 and board_rest < 2:
+                        continue
+                    if c_ch + 1 >= 3:
+                        safe_pool.append(i)
+                    elif held_size + 1 < 7:
+                        safe_pool.append(i)
+                if not safe_pool:
+                    break
+                pool = safe_pool
             else:
-                chosen = random.choice(pool)
+                break
+        chosen = random.choice(pool)
 
         pile ^= _bit[chosen]
         bt = _btype[chosen]
@@ -957,6 +1044,12 @@ def _heuristic_rank(pile: int, held: dict[int, int], held_size: int,
     new_pile, new_held, new_size, matched = _simulate_pick(pile, held, held_size, i)
     if new_size >= 7 and matched is None:
         return -1e9
+
+    # نفس حظر _assess_post_move: 6/7 بدون ماتش متاح = deadlock
+    if matched is None and new_size == 6:
+        avail_after_hr = _get_available(new_pile)
+        if not any(_will_complete(ix.btype[j], new_held) for j in ix.iter_bits(avail_after_hr)):
+            return -1e9
 
     remaining = _get_pile_type_counts(new_pile)
     analysis = _analyze_held(new_held, remaining)
@@ -1163,38 +1256,81 @@ def _beam_search(
             scored.append((s, i))
 
     pool = scored if scored else risky_fallback
+
+    current_singles = sum(1 for c in held.values() if c == 1)
+    if current_singles >= 3:
+        pair_scored = [(s, i) for s, i in scored if held.get(ix.btype[i], 0) == 1]
+        pair_risky  = [(s, i) for s, i in risky_fallback if held.get(ix.btype[i], 0) == 1]
+        pair_pool = pair_scored if pair_scored else pair_risky
+        if pair_pool:
+            pool = pair_pool
+
     if pool:
         pool.sort(key=lambda x: x[0], reverse=True)
+
+        use_mc = False
         if len(pool) >= 2:
             top_score = pool[0][0]
             second_score = pool[1][0]
-            margin = (top_score - second_score) / max(abs(top_score), 1) if top_score > 0 else 1.0
-
-            use_mc = False
+            diff = abs(top_score - second_score)
+            scale = max(abs(top_score), abs(second_score), 1.0)
+            margin = diff / scale
             if pile_size <= 160 and margin < 0.12:
                 use_mc = True
 
-            if use_mc:
-                top_n = min(4, len(pool))
-                top_moves = [x[1] for x in pool[:top_n]]
-                sims_per = max(80, 400 // len(top_moves))
-                best_avg = -1.0
-                best_m = top_moves[0]
-                for m in top_moves:
-                    np, nh, ns, _ = _simulate_pick(pile, held, held_size, m)
-                    total = 0
-                    random.seed(pile_size * 1000 + held_size * 100 + m)
-                    for _ in range(sims_per):
-                        total += 1 + _mc_rollout(np, dict(nh), ns)
-                    avg = total / sims_per
-                    if avg > best_avg:
-                        best_avg = avg
-                        best_m = m
-                return best_m, "ok"
+        if use_mc:
+            top_n = min(6, len(pool))
+            top_moves = [x[1] for x in pool[:top_n]]
+            sims_per = max(80, 600 // len(top_moves))
+            best_avg = -1.0
+            best_m = top_moves[0]
+            for m in top_moves:
+                np, nh, ns, _ = _simulate_pick(pile, held, held_size, m)
+                total = 0
+                random.seed(pile_size * 1000 + held_size * 100 + m)
+                for _ in range(sims_per):
+                    total += 1 + _mc_rollout(np, dict(nh), ns)
+                avg = total / sims_per
+                if avg > best_avg:
+                    best_avg = avg
+                    best_m = m
+            return best_m, "ok"
         return pool[0][1], "ok"
 
     # ---- Phase 3: MCTS emergency fallback ----
-    return _mcts_select(pile, held, held_size)
+    p3_result = _mcts_select(pile, held, held_size)
+    if p3_result[0] is not None:
+        return p3_result
+
+    # ---- Phase 4: الطوارئ الحقيقية ----
+    # كل التقييمات رفضت (موقف سيئ لكن اللعبة لم تنته بعد)
+    # جرّب أي حركة لا تخلق dead_pair ولا تسبب 7/7 فورياً
+    emergency: list[int] = []
+    for i in ix.iter_bits(avail):
+        new_pile_e, new_held_e, new_size_e, matched_e = _simulate_pick(pile, held, held_size, i)
+        if new_size_e >= 7 and matched_e is None:
+            continue
+        if _analyze_held(new_held_e, _get_pile_type_counts(new_pile_e))["dead_pair_types"]:
+            continue
+        emergency.append(i)
+
+    if emergency:
+        sims = max(20, 200 // len(emergency))
+        best_avg = -1.0
+        best_move = None
+        for m in emergency:
+            np_e, nh_e, ns_e, _ = _simulate_pick(pile, held, held_size, m)
+            total = 0
+            for _ in range(sims):
+                total += 1 + _mc_rollout(np_e, dict(nh_e), ns_e)
+            avg = total / sims
+            if avg > best_avg:
+                best_avg = avg
+                best_move = m
+        if best_move is not None:
+            return best_move, "ok"
+
+    return None, "all_rejected_by_evaluation"
 
 
 # ---------------------------------------------------------------------------
