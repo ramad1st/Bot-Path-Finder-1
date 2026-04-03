@@ -1141,6 +1141,34 @@ def _greedy_forward(pile, held, held_size, max_steps):
     return steps
 
 
+def _hf_score_move(pile, held, held_size, i, ix):
+    """Score a single move for heuristic forward."""
+    bt_i = ix.btype[i]
+    np, nh, ns, matched = _simulate_pick(pile, held, held_size, i)
+    if ns >= 7 and matched is None:
+        return None
+    remaining = _get_pile_type_counts(pile)
+    c_h = nh.get(bt_i, 0)
+    c_r = remaining.get(bt_i, 0)
+    if bt_i in nh:
+        left_in_pile = c_r - (1 if (pile >> i) & 1 else 0)
+    else:
+        left_in_pile = c_r
+    if c_h == 2 and left_in_pile == 0 and matched is None:
+        return None
+    s = 0.0
+    if matched is not None:
+        s += 7000
+    if held.get(bt_i, 0) == 1:
+        s += 3200
+    elif held.get(bt_i, 0) == 0:
+        s -= 800
+    s += ix.layer[i] * 160
+    s += _get_unlocks(pile, i) * 130
+    s -= ns * 400
+    return s
+
+
 def _heuristic_forward(pile, held, held_size, max_steps):
     """Run forward using fast heuristic scoring. Returns step count."""
     ix = _level_idx
@@ -1149,47 +1177,17 @@ def _heuristic_forward(pile, held, held_size, max_steps):
         avail = _get_available(pile)
         if avail == 0:
             break
-
         best_s = -float("inf")
         best_m = -1
         any_valid = False
-
-        remaining = _get_pile_type_counts(pile)
-
         for i in ix.iter_bits(avail):
-            bt_i = ix.btype[i]
-            np, nh, ns, matched = _simulate_pick(pile, held, held_size, i)
-            if ns >= 7 and matched is None:
-                continue
-
-            c_h = nh.get(bt_i, 0)
-            c_r = remaining.get(bt_i, 0)
-            if bt_i in nh:
-                left_in_pile = c_r - (1 if (pile >> i) & 1 else 0)
-            else:
-                left_in_pile = c_r
-            if c_h == 2 and left_in_pile == 0 and matched is None:
-                continue
-
-            s = 0.0
-            if matched is not None:
-                s += 7000
-            if held.get(bt_i, 0) == 1:
-                s += 3200
-            elif held.get(bt_i, 0) == 0:
-                s -= 800
-            s += ix.layer[i] * 160
-            s += _get_unlocks(pile, i) * 130
-            s -= ns * 400
-
-            if s > best_s:
+            s = _hf_score_move(pile, held, held_size, i, ix)
+            if s is not None and s > best_s:
                 best_s = s
                 best_m = i
                 any_valid = True
-
         if not any_valid:
             break
-
         pile, held, held_size = _apply_pick_raw(pile, dict(held), held_size, best_m)
         steps += 1
     return steps
@@ -1475,8 +1473,8 @@ def _beam_search(
         heur_reach_hf = next(r for r, m in reaches_hf if m == heur_pick)
         best_hf = max(reaches_hf, key=lambda x: x[0])
 
-        bt_veto = best_bt[0] >= heur_reach_bt + 5 and best_bt[1] != heur_pick
-        hf_veto = best_hf[0] >= heur_reach_hf + 5 and best_hf[1] != heur_pick
+        bt_veto = best_bt[0] >= heur_reach_bt + 3 and best_bt[1] != heur_pick
+        hf_veto = best_hf[0] >= heur_reach_hf + 3 and best_hf[1] != heur_pick
 
         if bt_veto:
             return best_bt[1], "ok"
