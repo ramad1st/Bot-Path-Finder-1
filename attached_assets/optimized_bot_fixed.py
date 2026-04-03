@@ -1193,6 +1193,65 @@ def _heuristic_forward(pile, held, held_size, max_steps):
     return steps
 
 
+def _beam_game_rollout(pile: int, held: dict[int, int], held_size: int,
+                       n_beams: int = 3, max_steps: int = 60) -> int:
+    ix = _level_idx
+    beams = [(pile, dict(held), held_size)]
+    steps = 0
+
+    while steps < max_steps and beams:
+        next_beams = []
+
+        for p, h, hs in beams:
+            avail = _get_available(p)
+            if avail == 0:
+                continue
+
+            imm = None
+            for i in ix.iter_bits(avail):
+                if _will_complete(ix.btype[i], h):
+                    np, nh, ns, matched = _simulate_pick(p, h, hs, i)
+                    if matched is not None and ns < 7:
+                        imm = (np, dict(nh), ns)
+                        break
+
+            if imm:
+                next_beams.append(imm)
+                continue
+
+            scored = []
+            for i in ix.iter_bits(avail):
+                s = _hf_score_move(p, h, hs, i, ix)
+                if s is not None:
+                    scored.append((s, i))
+
+            if not scored:
+                continue
+
+            scored.sort(key=lambda x: x[0], reverse=True)
+            for _, m in scored[:2]:
+                np, nh, ns = _apply_pick_raw(p, dict(h), hs, m)
+                next_beams.append((np, nh, ns))
+
+        if not next_beams:
+            break
+
+        if len(next_beams) > n_beams:
+            def _beam_key(b):
+                p, h, hs = b
+                ps = _popcount(p)
+                stuck = sum(1 for t, c in h.items()
+                            if 0 < c < 3 and _min_blockers_for_type(p, t) >= 3)
+                return (ps * 10 + hs * 3 + stuck * 8,)
+            next_beams.sort(key=_beam_key)
+            next_beams = next_beams[:n_beams]
+
+        beams = next_beams
+        steps += 1
+
+    return steps
+
+
 def _bt_rollout(pile: int, held: dict[int, int], held_size: int,
                 max_steps: int = 80, bt_budget: int = 6, max_alts: int = 3) -> int:
     """Greedy forward simulation with backtracking. Returns max steps achievable."""
