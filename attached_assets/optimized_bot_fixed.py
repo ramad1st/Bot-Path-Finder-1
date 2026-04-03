@@ -27,6 +27,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 import struct
 import threading
 import time
@@ -859,7 +860,194 @@ def _lookahead(
 
 
 # ---------------------------------------------------------------------------
-#  Beam search — main entry point
+#  Monte Carlo rollout — fast heuristic simulation
+# ---------------------------------------------------------------------------
+
+def _mc_rollout(pile: int, held: dict[int, int], held_size: int,
+                max_steps: int = 500) -> int:
+    ix = _level_idx  # type: ignore[union-attr]
+    steps = 0
+    _btype = ix.btype
+    _bit = ix.bit
+    _iter = ix.iter_bits
+
+    while steps < max_steps:
+        avail = _get_available(pile)
+        if avail == 0:
+            break
+
+        while True:
+            found_match = False
+            for i in _iter(avail):
+                if held.get(_btype[i], 0) >= 2:
+                    pile ^= _bit[i]
+                    bt = _btype[i]
+                    held = dict(held)
+                    held[bt] = held.get(bt, 0) + 1
+                    if held[bt] >= 3:
+                        held[bt] -= 3
+                        if held[bt] == 0:
+                            del held[bt]
+                        held_size -= 2
+                    else:
+                        held_size += 1
+                    steps += 1
+                    found_match = True
+                    avail = _get_available(pile)
+                    break
+            if not found_match:
+                break
+
+        if avail == 0:
+            break
+
+        pair_moves: list[int] = []
+        other_moves: list[int] = []
+        _tmask = ix.type_mask
+        for i in _iter(avail):
+            bt = _btype[i]
+            c = held.get(bt, 0)
+            if c == 1:
+                new_pile_chk = pile ^ _bit[i]
+                if (new_pile_chk & _tmask.get(bt, 0)) == 0:
+                    continue
+                pair_moves.append(i)
+            elif c == 0:
+                if held_size >= 5:
+                    new_pile_chk = pile ^ _bit[i]
+                    if _popcount(new_pile_chk & _tmask.get(bt, 0)) < 2:
+                        continue
+                other_moves.append(i)
+
+        if held_size >= 6:
+            if pair_moves:
+                chosen = random.choice(pair_moves)
+            else:
+                break
+        elif held_size >= 5:
+            pool = pair_moves if pair_moves else other_moves
+            if not pool:
+                break
+            chosen = random.choice(pool)
+        else:
+            pool = pair_moves + other_moves
+            if not pool:
+                break
+            if pair_moves and random.random() < 0.5:
+                chosen = random.choice(pair_moves)
+            else:
+                chosen = random.choice(pool)
+
+        pile ^= _bit[chosen]
+        bt = _btype[chosen]
+        held = dict(held)
+        held[bt] = held.get(bt, 0) + 1
+        held_size += 1
+        steps += 1
+
+        if held_size >= 7:
+            break
+
+    return steps
+
+
+def _heuristic_rank(pile: int, held: dict[int, int], held_size: int,
+                    i: int) -> float:
+    ix = _level_idx  # type: ignore[union-attr]
+    new_pile, new_held, new_size, matched = _simulate_pick(pile, held, held_size, i)
+    if new_size >= 7 and matched is None:
+        return -1e9
+
+    remaining = _get_pile_type_counts(new_pile)
+    analysis = _analyze_held(new_held, remaining)
+    if analysis["dead_pair_types"]:
+        return -1e9
+
+    btype_i = ix.btype[i]
+    in_hand = held.get(btype_i, 0)
+    avail_tc = _get_avail_type_counts(pile)
+
+    s = 0.0
+    if matched is not None:
+        s += 7000
+
+    if in_hand == 0:
+        visible = avail_tc.get(btype_i, 0)
+        if visible >= 3:
+            s += 5000
+        elif visible == 2:
+            s += 1000
+        mb = _min_blockers_for_type(new_pile, btype_i)
+        if mb >= 4:
+            s -= 4000
+        elif mb >= 3:
+            s -= 2000
+    elif in_hand == 1:
+        avail_after = _get_available(new_pile)
+        third = _popcount(avail_after & ix.type_mask.get(btype_i, 0))
+        if third:
+            s += 6000
+        else:
+            board_left = _popcount(new_pile & ix.type_mask.get(btype_i, 0))
+            if board_left:
+                s += 1500
+            else:
+                s -= 3000
+
+    s += ix.layer[i] * 120
+    s += _get_unlocks(pile, i) * 100
+    s += _get_depth_below(pile, i) * 60
+
+    if new_size >= 6:
+        s -= 5000
+    elif new_size >= 5:
+        s -= 1500
+
+    return s
+
+
+def _mcts_select(pile: int, held: dict[int, int], held_size: int,
+                 n_sims: int = 800) -> tuple[Optional[int], str]:
+    ix = _level_idx  # type: ignore[union-attr]
+    avail = _get_available(pile)
+    if avail == 0:
+        return None, "no_available_on_board"
+
+    scored: list[tuple[float, int]] = []
+    for i in ix.iter_bits(avail):
+        h = _heuristic_rank(pile, held, held_size, i)
+        if h > -1e8:
+            scored.append((h, i))
+
+    if not scored:
+        return None, "all_rejected_by_evaluation"
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    top_n = min(6, len(scored))
+    candidates = [s[1] for s in scored[:top_n]]
+
+    sims_per = max(30, n_sims // len(candidates))
+
+    best_avg = -1.0
+    best_move = None
+
+    for move in candidates:
+        new_pile, new_held, new_size, matched = _simulate_pick(pile, held, held_size, move)
+        total = 0
+        for _ in range(sims_per):
+            total += 1 + _mc_rollout(new_pile, dict(new_held), new_size)
+        avg = total / sims_per
+        if avg > best_avg:
+            best_avg = avg
+            best_move = move
+
+    if best_move is not None:
+        return best_move, "ok"
+    return None, "all_rejected_by_evaluation"
+
+
+# ---------------------------------------------------------------------------
+#  Beam search — main entry point (heuristic + MCTS tiebreaker)
 # ---------------------------------------------------------------------------
 
 def _beam_search(
@@ -915,7 +1103,7 @@ def _beam_search(
         immediate.sort(key=lambda x: x[0], reverse=True)
         return immediate[0][1], "ok"
 
-    # ---- Phase 2: general moves ---
+    # ---- Phase 2: general moves (heuristic + MCTS tiebreaker for close calls) ---
     scored: list[tuple[float, int]]       = []
     risky_fallback: list[tuple[float, int]] = []
 
@@ -968,134 +1156,33 @@ def _beam_search(
         else:
             scored.append((s, i))
 
-    if scored:
-        scored.sort(key=lambda x: x[0], reverse=True)
-        return scored[0][1], "ok"
+    pool = scored if scored else risky_fallback
+    if pool:
+        pool.sort(key=lambda x: x[0], reverse=True)
+        if len(pool) >= 2 and pile_size <= 160:
+            top_score = pool[0][0]
+            second_score = pool[1][0]
+            margin = (top_score - second_score) / max(abs(top_score), 1) if top_score > 0 else 1.0
+            if margin < 0.12:
+                top_moves = [x[1] for x in pool[:min(4, len(pool))]]
+                sims_per = max(80, 400 // len(top_moves))
+                best_avg = -1.0
+                best_m = top_moves[0]
+                for m in top_moves:
+                    np, nh, ns, _ = _simulate_pick(pile, held, held_size, m)
+                    total = 0
+                    random.seed(pile_size * 1000 + held_size * 100 + m)
+                    for _ in range(sims_per):
+                        total += 1 + _mc_rollout(np, dict(nh), ns)
+                    avg = total / sims_per
+                    if avg > best_avg:
+                        best_avg = avg
+                        best_m = m
+                return best_m, "ok"
+        return pool[0][1], "ok"
 
-    if risky_fallback:
-        risky_fallback.sort(key=lambda x: x[0], reverse=True)
-        logger.warning("[BOT] كل الخيارات فيها dead single — fallback")
-        return risky_fallback[0][1], "ok"
-
-    # ---- Phase 3: Emergency fallback — FIX-3 ذكي ومتدرج ----
-    # يُفعَّل فقط عندما ترفض كل الفلاتر الاعتيادية جميع الحركات
-    # لكن لا تزال توجد بلوكات متاحة على اللوح.
-    # الأولوية: ماتش فوري → مخرج في الخطوة التالية → أعلى unlock → أقل ضرر
-    tier1: list[tuple[float, int]] = []   # ماتش فوري
-    tier2: list[tuple[float, int]] = []   # finish_next = True بعد الحركة
-    tier3: list[tuple[float, int]] = []   # held يبقى <= 4 وعالي الـ unlock
-    tier4: list[tuple[float, int]] = []   # أي حركة لا تقتل فوراً
-
-    for i in ix.iter_bits(avail):
-        new_pile_e, new_held_e, new_size_e, matched_e = _simulate_pick(pile, held, held_size, i)
-
-        if new_size_e >= 7 and matched_e is None:
-            avail_after_e2 = _get_available(new_pile_e)
-            if not any(_will_complete(ix.btype[j], new_held_e)
-                       for j in ix.iter_bits(avail_after_e2)):
-                continue
-        remaining_e = _get_pile_type_counts(new_pile_e)
-        analysis_e = _analyze_held(new_held_e, remaining_e)
-        if analysis_e["dead_pair_types"]:
-            continue
-
-        unlocks_e  = _get_unlocks(pile, i)
-        layer_e    = ix.layer[i]
-        depth_e    = _get_depth_below(pile, i)
-        base_score = unlocks_e * 200 + layer_e * 150 + depth_e * 100 + _uncover_score(pile, held, i)
-
-        if matched_e is not None:
-            # Tier 1: ماتش فوري — دائماً آمن
-            tier1.append((base_score + _score_state(new_pile_e, new_held_e, new_size_e), i))
-            continue
-
-        # هل يوجد مخرج بعد هذه الحركة؟
-        avail_after_e = _get_available(new_pile_e)
-        finish_next_e = any(
-            _will_complete(ix.btype[j], new_held_e)
-            for j in ix.iter_bits(avail_after_e)
-        )
-
-        if finish_next_e:
-            # Tier 2: يمكننا إكمال ثلاثية في الخطوة القادمة
-            tier2.append((base_score, i))
-            continue
-
-        if new_size_e <= 4:
-            # Tier 3: اليد آمنة (<=4) — لا خطر وشيك
-            tier3.append((base_score, i))
-            continue
-
-        # Tier 4: آخر ملجأ فقط إذا كان النوع قابلاً للإكمال (≥3 مجموعاً)
-        # نرفض أي نوع مستحيل الإكمال حتى في أسوأ الأحوال
-        btype_e       = ix.btype[i]
-        in_hand_e     = held.get(btype_e, 0)
-        board_left_e  = _popcount(new_pile_e & ix.type_mask.get(btype_e, 0))
-        need_e        = 3 - (in_hand_e + 1)          # كم باقي للماتش بعد الأخذ
-
-        if board_left_e < need_e:
-            continue  # النوع لن يكتمل أبداً — تجاهل حتى في الطوارئ
-
-        overflow_pen = 0
-        if new_size_e >= 6 and not finish_next_e:
-            overflow_pen = (new_size_e - 5) * 15000
-
-        if new_size_e >= 5:
-            if in_hand_e == 0 and board_left_e < 2:
-                continue
-            if in_hand_e == 1 and board_left_e < 1:
-                continue
-
-        # T4a: يبقى held ≤ 5 (خطر محدود)
-        # T4b: يصل held = 6 (خطر عالي — آخر ملجأ)
-        # نفصلهم لنفضل T4a دائماً على T4b
-        types_in_hand    = sum(1 for c in held.values() if c > 0)
-        completability   = min(board_left_e, 4) * 400
-        # هل توجد طريقة خروج خلال 3 خطوات من هذه الحركة؟
-        escape_bonus     = 4000 if _finish_in_three(new_pile_e, new_held_e, new_size_e) else 0
-        size_pen         = (new_size_e - 4) * 2500
-
-        # --- تقييم نوع الحركة ---
-        if in_hand_e == 0:
-            # نوع جديد: تنوع إضافي يجعل الوضع أصعب
-            # العقوبة تتزايد بشدة مع كثرة الأنواع الموجودة
-            diversity_pen = max(0, types_in_hand - 2) * 6000
-            pair_bonus    = 0
-        elif in_hand_e == 1:
-            # نكوّن زوجاً: مفضّل دائماً على إضافة نوع جديد
-            diversity_pen = 0
-            avail_after   = _get_available(new_pile_e)
-            third_visible = _popcount(avail_after & ix.type_mask.get(btype_e, 0))
-            pair_bonus    = 3000 if third_visible > 0 else 0  # الثالث مرئي = ممتاز
-        else:
-            # لدينا زوج بالفعل → ثلاثية فورية (يجب أن تُلتقط في T1 قبل هذا)
-            diversity_pen = 0
-            pair_bonus    = 5000
-
-        score_e = base_score + completability + escape_bonus + pair_bonus - size_pen - diversity_pen - overflow_pen
-
-        if new_size_e <= 5:
-            tier4.append((score_e + 10000, i))   # T4a: مفضّل بشدة على T4b
-        else:
-            tier4.append((score_e, i))            # T4b: فقط إذا لا يوجد T4a
-
-    for tier_name, tier in [("T1-ماتش", tier1), ("T2-مخرج_قادم", tier2),
-                              ("T3-يد_آمنة", tier3), ("T4-أخير", tier4)]:
-        if tier:
-            tier.sort(key=lambda x: x[0], reverse=True)
-            ix = _level_idx  # type: ignore[union-attr]
-            chosen_type  = ix.btype[tier[0][1]]
-            in_hand_cnt  = held.get(chosen_type, 0)
-            top3_info    = [(ix.btype[b], held.get(ix.btype[b], 0), round(s, 0))
-                            for s, b in tier[:3]]
-            logger.warning(
-                f"[BOT] طارئ [{tier_name}]: اخترنا نوع={chosen_type} "
-                f"(في_اليد={in_hand_cnt}) | يد={held_size}/7 | باقي={_popcount(pile)} | "
-                f"اليد_كاملة={dict(held)} | أفضل3={top3_info}"
-            )
-            return tier[0][1], "ok"
-
-    return None, "all_rejected_by_evaluation"
+    # ---- Phase 3: MCTS emergency fallback ----
+    return _mcts_select(pile, held, held_size)
 
 
 # ---------------------------------------------------------------------------
