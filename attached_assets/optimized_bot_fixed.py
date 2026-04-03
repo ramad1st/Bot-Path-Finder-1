@@ -1125,7 +1125,7 @@ def _get_greedy_moves(pile, held, held_size):
                 pool.append(i)
 
     if pool:
-        pool.sort(key=lambda i: ix.layer[i], reverse=True)
+        pool.sort(key=lambda i: (ix.layer[i] * 3 + _get_unlocks(pile, i)), reverse=True)
     return pool, pile, held, held_size
 
 
@@ -1137,6 +1137,60 @@ def _greedy_forward(pile, held, held_size, max_steps):
         if not moves:
             break
         pile, held, held_size = _apply_pick_raw(p2, h2, hs2, moves[0])
+        steps += 1
+    return steps
+
+
+def _heuristic_forward(pile, held, held_size, max_steps):
+    """Run forward using fast heuristic scoring. Returns step count."""
+    ix = _level_idx
+    steps = 0
+    while steps < max_steps:
+        avail = _get_available(pile)
+        if avail == 0:
+            break
+
+        best_s = -float("inf")
+        best_m = -1
+        any_valid = False
+
+        remaining = _get_pile_type_counts(pile)
+
+        for i in ix.iter_bits(avail):
+            bt_i = ix.btype[i]
+            np, nh, ns, matched = _simulate_pick(pile, held, held_size, i)
+            if ns >= 7 and matched is None:
+                continue
+
+            c_h = nh.get(bt_i, 0)
+            c_r = remaining.get(bt_i, 0)
+            if bt_i in nh:
+                left_in_pile = c_r - (1 if (pile >> i) & 1 else 0)
+            else:
+                left_in_pile = c_r
+            if c_h == 2 and left_in_pile == 0 and matched is None:
+                continue
+
+            s = 0.0
+            if matched is not None:
+                s += 7000
+            if held.get(bt_i, 0) == 1:
+                s += 3200
+            elif held.get(bt_i, 0) == 0:
+                s -= 800
+            s += ix.layer[i] * 160
+            s += _get_unlocks(pile, i) * 130
+            s -= ns * 400
+
+            if s > best_s:
+                best_s = s
+                best_m = i
+                any_valid = True
+
+        if not any_valid:
+            break
+
+        pile, held, held_size = _apply_pick_raw(pile, dict(held), held_size, best_m)
         steps += 1
     return steps
 
@@ -1404,19 +1458,33 @@ def _beam_search(
 
         top_n = min(6, len(pool))
         top_items = pool[:top_n]
-        reaches = []
+        reaches_bt = []
+        reaches_hf = []
         for _, m in top_items:
             np, nh, ns, _ = _simulate_pick(pile, held, held_size, m)
-            reach = 1 + _bt_rollout(np, dict(nh), ns)
-            reaches.append((reach, m))
+            r_bt = 1 + _bt_rollout(np, dict(nh), ns)
+            r_hf = 1 + _heuristic_forward(np, dict(nh), ns, 80)
+            reaches_bt.append((r_bt, m))
+            reaches_hf.append((r_hf, m))
 
         heur_pick = top_items[0][1]
-        heur_reach = next(r for r, m in reaches if m == heur_pick)
-        best_reach_val = max(r for r, _ in reaches)
-        best_reach_move = max(reaches, key=lambda x: x[0])[1]
 
-        if best_reach_val >= heur_reach + 5 and best_reach_move != heur_pick:
-            return best_reach_move, "ok"
+        heur_reach_bt = next(r for r, m in reaches_bt if m == heur_pick)
+        best_bt = max(reaches_bt, key=lambda x: x[0])
+
+        heur_reach_hf = next(r for r, m in reaches_hf if m == heur_pick)
+        best_hf = max(reaches_hf, key=lambda x: x[0])
+
+        bt_veto = best_bt[0] >= heur_reach_bt + 5 and best_bt[1] != heur_pick
+        hf_veto = best_hf[0] >= heur_reach_hf + 5 and best_hf[1] != heur_pick
+
+        if bt_veto:
+            return best_bt[1], "ok"
+        if hf_veto and not bt_veto:
+            hf_candidate = best_hf[1]
+            hf_bt_reach = next(r for r, m in reaches_bt if m == hf_candidate)
+            if hf_bt_reach >= heur_reach_bt:
+                return hf_candidate, "ok"
         return heur_pick, "ok"
 
     # ---- Phase 3: MCTS emergency fallback ----
