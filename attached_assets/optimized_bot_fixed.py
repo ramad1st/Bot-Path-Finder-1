@@ -340,6 +340,70 @@ def _has_immediate_finish(pile: int, held: dict[int, int]) -> bool:
     return False
 
 
+def _finish_in_two(pile: int, held: dict[int, int], held_size: int) -> bool:
+    """هل يمكن إكمال ثلاثية خلال خطوتين من الآن؟ (بدون تجاوز 6 في اليد)"""
+    ix = _level_idx  # type: ignore[union-attr]
+    avail = _get_available(pile)
+    for i in ix.iter_bits(avail):
+        np1, nh1, ns1, m1 = _simulate_pick(pile, held, held_size, i)
+        if m1 is not None:
+            return True                          # ماتش في خطوة واحدة
+        if ns1 >= 7:
+            continue
+        avail2 = _get_available(np1)
+        for j in ix.iter_bits(avail2):
+            _, _, ns2, m2 = _simulate_pick(np1, nh1, ns1, j)
+            if m2 is not None and ns2 < 7:
+                return True                      # ماتش في خطوتين
+    return False
+
+
+def _post_match_viable(pile: int, held: dict[int, int], held_size: int) -> bool:
+    """هل الحالة بعد الماتش آمنة؟ يكفي أن يكون في اليد نوع واحد متاح فوراً"""
+    if held_size <= 3:
+        return True  # يد صغيرة = آمنة دائماً
+    ix = _level_idx  # type: ignore[union-attr]
+    avail = _get_available(pile)
+    # نبحث: هل أي نوع في اليد موجود في المتاح الآن أو في خطوتين؟
+    for t, c in held.items():
+        if c == 0:
+            continue
+        if _popcount(avail & ix.type_mask.get(t, 0)) > 0:
+            return True  # نوع متاح فوراً
+    return _finish_in_two(pile, held, held_size)
+
+
+def _finish_in_three(pile: int, held: dict[int, int], held_size: int) -> bool:
+    """هل يمكن إكمال ثلاثية خلال 3 خطوات وتظل الحالة بعدها قابلة للاستمرار؟"""
+    ix = _level_idx  # type: ignore[union-attr]
+    avail = _get_available(pile)
+    for i in ix.iter_bits(avail):
+        np1, nh1, ns1, m1 = _simulate_pick(pile, held, held_size, i)
+        if m1 is not None:
+            # تحقق: الحالة بعد الماتش مستمرة؟
+            if _post_match_viable(np1, nh1, ns1):
+                return True
+            continue
+        if ns1 >= 7:
+            continue
+        avail2 = _get_available(np1)
+        for j in ix.iter_bits(avail2):
+            np2, nh2, ns2, m2 = _simulate_pick(np1, nh1, ns1, j)
+            if m2 is not None and ns2 < 7:
+                if _post_match_viable(np2, nh2, ns2):
+                    return True
+                continue
+            if ns2 >= 7:
+                continue
+            avail3 = _get_available(np2)
+            for k in ix.iter_bits(avail3):
+                np3, nh3, ns3, m3 = _simulate_pick(np2, nh2, ns2, k)
+                if m3 is not None and ns3 < 7:
+                    # في 3 خطوات نقبل حتى بدون فحص post-match (بعيد كفاية)
+                    return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 #  Analysis & scoring  (logic preserved from original, data structures faster)
 # ---------------------------------------------------------------------------
@@ -535,10 +599,22 @@ def _assess_post_move(
     block_count_after = new_held.get(btype, 0)
 
     if matched is None and new_size >= 5 and not finish_next:
-        return False, 0.0, analysis
+        # نتحقق: هل يوجد مخرج خلال 3 خطوات؟ إذا نعم نسمح بالحركة
+        if not _finish_in_three(new_pile, new_held, new_size):
+            return False, 0.0, analysis
+
+    # حالة خاصة: إضافة نوع جديد عند وجود 3+ أنواع غير مكتملة أصلاً
+    # نرفض إذا لم يكن هناك مخرج خلال 3 خطوات بعد الماتش
+    if (matched is None and new_size >= 4 and not finish_next
+            and btype not in held
+            and sum(1 for c in held.values() if 0 < c < 3) >= 3):
+        if not _finish_in_three(new_pile, new_held, new_size):
+            return False, 0.0, analysis
 
     if matched is None and block_count_after == 2 and btype not in avail_finish_types:
-        return False, 0.0, analysis
+        # نتحقق: هل يوجد مخرج خلال 3 خطوات؟ إذا نعم نسمح بالحركة
+        if not _finish_in_three(new_pile, new_held, new_size):
+            return False, 0.0, analysis
 
     # ---- penalties / bonuses ----
     penalty = 0.0
@@ -560,6 +636,15 @@ def _assess_post_move(
 
     if matched is None and new_type:
         penalty -= max(0, open_after - 2) * 1800.0
+
+    # عقوبة إضافية: إضافة نوع رابع/خامس جديد لليد المتنوعة أصلاً
+    # (النوع الجديد ليس مرئياً بشكل كافٍ للإكمال قريباً)
+    if matched is None and new_type and current_open >= 3:
+        # كم مرة يظهر هذا النوع في المتاح بعد الأخذ؟
+        avail_of_new_type = _popcount(_get_available(new_pile) & ix.type_mask.get(btype, 0))
+        if avail_of_new_type < 2:  # النوع الجديد غير متاح للإكمال بسرعة
+            extra_diversity_pen = (current_open - 2) * 4500.0
+            penalty -= extra_diversity_pen
 
     if matched is None and new_type and current_open >= 2 and new_size >= 5 and unlocks < 2 and not strong:
         penalty -= 3500.0
@@ -848,18 +933,69 @@ def _beam_search(
             tier3.append((base_score, i))
             continue
 
-        # Tier 4: آخر ملجأ — لا نصل لـ 6+ إلا مضطرين
-        # عقوبة على الارتفاع في اليد حتى لا نختار 5/6 بدون سبب
-        penalty_e = (new_size_e - 4) * 3000
-        tier4.append((base_score - penalty_e, i))
+        # Tier 4: آخر ملجأ فقط إذا كان النوع قابلاً للإكمال (≥3 مجموعاً)
+        # نرفض أي نوع مستحيل الإكمال حتى في أسوأ الأحوال
+        btype_e       = ix.btype[i]
+        in_hand_e     = held.get(btype_e, 0)
+        board_left_e  = _popcount(new_pile_e & ix.type_mask.get(btype_e, 0))
+        need_e        = 3 - (in_hand_e + 1)          # كم باقي للماتش بعد الأخذ
+
+        if board_left_e < need_e:
+            continue  # النوع لن يكتمل أبداً — تجاهل حتى في الطوارئ
+
+        # إذا كانت اليد ≥5: نقبل فقط إذا في يدنا مسبقاً زوج أو يوجد ≥2 منه على اللوح
+        if new_size_e >= 5:
+            if in_hand_e == 0 and board_left_e < 2:
+                continue  # نوع جديد ولا يكفي للإكمال
+            if in_hand_e == 1 and board_left_e < 1:
+                continue  # زوج ولا ثالث موجود
+
+        # T4a: يبقى held ≤ 5 (خطر محدود)
+        # T4b: يصل held = 6 (خطر عالي — آخر ملجأ)
+        # نفصلهم لنفضل T4a دائماً على T4b
+        types_in_hand    = sum(1 for c in held.values() if c > 0)
+        completability   = min(board_left_e, 4) * 400
+        # هل توجد طريقة خروج خلال 3 خطوات من هذه الحركة؟
+        escape_bonus     = 4000 if _finish_in_three(new_pile_e, new_held_e, new_size_e) else 0
+        size_pen         = (new_size_e - 4) * 2500
+
+        # --- تقييم نوع الحركة ---
+        if in_hand_e == 0:
+            # نوع جديد: تنوع إضافي يجعل الوضع أصعب
+            # العقوبة تتزايد بشدة مع كثرة الأنواع الموجودة
+            diversity_pen = max(0, types_in_hand - 2) * 6000
+            pair_bonus    = 0
+        elif in_hand_e == 1:
+            # نكوّن زوجاً: مفضّل دائماً على إضافة نوع جديد
+            diversity_pen = 0
+            avail_after   = _get_available(new_pile_e)
+            third_visible = _popcount(avail_after & ix.type_mask.get(btype_e, 0))
+            pair_bonus    = 3000 if third_visible > 0 else 0  # الثالث مرئي = ممتاز
+        else:
+            # لدينا زوج بالفعل → ثلاثية فورية (يجب أن تُلتقط في T1 قبل هذا)
+            diversity_pen = 0
+            pair_bonus    = 5000
+
+        score_e = base_score + completability + escape_bonus + pair_bonus - size_pen - diversity_pen
+
+        if new_size_e <= 5:
+            tier4.append((score_e + 10000, i))   # T4a: مفضّل بشدة على T4b
+        else:
+            tier4.append((score_e, i))            # T4b: فقط إذا لا يوجد T4a
 
     for tier_name, tier in [("T1-ماتش", tier1), ("T2-مخرج_قادم", tier2),
                               ("T3-يد_آمنة", tier3), ("T4-أخير", tier4)]:
         if tier:
             tier.sort(key=lambda x: x[0], reverse=True)
+            ix = _level_idx  # type: ignore[union-attr]
+            chosen_type  = ix.btype[tier[0][1]]
+            in_hand_cnt  = held.get(chosen_type, 0)
+            top3_info    = [(ix.btype[b], held.get(ix.btype[b], 0), round(s, 0))
+                            for s, b in tier[:3]]
             logger.warning(
-                f"[BOT] طارئ [{tier_name}]: اخترنا الأفضل من {len(tier)} خيار "
-                f"(يد={held_size}/7 | باقي={_popcount(pile)})"
+                f"[BOT] طارئ [{tier_name}]: اخترنا نوع={chosen_type} "
+                f"(في_اليد={in_hand_cnt}) | يد={held_size}/7 | باقي={_popcount(pile)} | "
+                f"اليد_كاملة={dict(held)} | أفضل3={top3_info}"
             )
             return tier[0][1], "ok"
 
