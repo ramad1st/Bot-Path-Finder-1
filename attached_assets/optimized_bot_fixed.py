@@ -232,6 +232,8 @@ def _clear_caches() -> None:
 
 
 _board_difficulty = 0
+_DBG_DECISION = False
+_total_tiles = 225
 
 def _compute_board_difficulty(pile: int) -> int:
     ix = _level_idx
@@ -1195,7 +1197,7 @@ def _greedy_forward(pile, held, held_size, max_steps):
     return steps
 
 
-def _hf_score_move(pile, held, held_size, i, ix):
+def _hf_score_move(pile, held, held_size, i, ix, strict_pair=False):
     """Score a single move for heuristic forward."""
     bt_i = ix.btype[i]
     np, nh, ns, matched = _simulate_pick(pile, held, held_size, i)
@@ -1213,9 +1215,26 @@ def _hf_score_move(pile, held, held_size, i, ix):
     s = 0.0
     if matched is not None:
         s += 7000
-    if held.get(bt_i, 0) == 1:
-        s += 3200
-    elif held.get(bt_i, 0) == 0:
+    in_h = held.get(bt_i, 0)
+    if _board_difficulty < 87:
+        _sp_thresh = 6
+    elif _board_difficulty >= 100:
+        _sp_thresh = 5
+    elif _board_difficulty >= 90:
+        _sp_thresh = 3
+    else:
+        _sp_thresh = 5
+    if in_h == 1:
+        if strict_pair and ns >= _sp_thresh:
+            avail_np = ix.available_mask(np)
+            if _popcount(avail_np & ix.type_mask.get(bt_i, 0)):
+                s += 5000
+            else:
+                mb_hf = _min_blockers_for_type(np, bt_i)
+                s += (-3000 if mb_hf >= 3 else 1500)
+        else:
+            s += 3200
+    elif in_h == 0:
         s -= 800
     s += ix.layer[i] * 160
     s += _get_unlocks(pile, i) * 130
@@ -1223,7 +1242,7 @@ def _hf_score_move(pile, held, held_size, i, ix):
     return s
 
 
-def _heuristic_forward(pile, held, held_size, max_steps):
+def _heuristic_forward(pile, held, held_size, max_steps, strict_pair=False):
     """Run forward using fast heuristic scoring. Returns step count."""
     ix = _level_idx
     steps = 0
@@ -1235,7 +1254,7 @@ def _heuristic_forward(pile, held, held_size, max_steps):
         best_m = -1
         any_valid = False
         for i in ix.iter_bits(avail):
-            s = _hf_score_move(pile, held, held_size, i, ix)
+            s = _hf_score_move(pile, held, held_size, i, ix, strict_pair=strict_pair)
             if s is not None and s > best_s:
                 best_s = s
                 best_m = i
@@ -1421,7 +1440,7 @@ def _mcts_select(pile: int, held: dict[int, int], held_size: int,
         return None, "all_rejected_by_evaluation"
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    hard_board = _board_difficulty >= 95
+    hard_board = _board_difficulty >= 90
     mcts_top = min(10 if hard_board else 6, len(scored))
     candidates = [s[1] for s in scored[:mcts_top]]
 
@@ -1462,7 +1481,7 @@ def _beam_search(
     if not avail:
         return None, "no_available_on_board"
 
-    hard_board = _board_difficulty >= 95
+    hard_board = _board_difficulty >= 90
     avail_tc = _get_avail_type_counts(pile)
     pile_size = _popcount(pile)
 
@@ -1548,7 +1567,8 @@ def _beam_search(
         s += ix.layer[i] * 160
         s += _get_unlocks(pile, i) * 130
         s += _get_depth_below(pile, i) * 90
-        s += _uncover_score(pile, held, i) * 1.5
+        unc_mult = 2.5 if hard_board else 1.5
+        s += _uncover_score(pile, held, i) * unc_mult
 
         if depth > 1:
             la_coeff = 0.55
@@ -1576,14 +1596,14 @@ def _beam_search(
         pool.sort(key=lambda x: x[0], reverse=True)
 
         veto_top = min(10 if hard_board else 6, len(pool))
-        veto_threshold = 3
+        veto_threshold = 2 if hard_board else 3
         top_items = pool[:veto_top]
         reaches_bt = []
         reaches_hf = []
         for _, m in top_items:
             np, nh, ns, _ = _simulate_pick(pile, held, held_size, m)
             r_bt = 1 + _bt_rollout(np, dict(nh), ns)
-            r_hf = 1 + _heuristic_forward(np, dict(nh), ns, 80)
+            r_hf = 1 + _heuristic_forward(np, dict(nh), ns, 80, strict_pair=True)
             reaches_bt.append((r_bt, m))
             reaches_hf.append((r_hf, m))
 
@@ -1598,12 +1618,27 @@ def _beam_search(
         bt_veto = best_bt[0] >= heur_reach_bt + veto_threshold and best_bt[1] != heur_pick
         hf_veto = best_hf[0] >= heur_reach_hf + veto_threshold and best_hf[1] != heur_pick
 
+        if _DBG_DECISION:
+            _n_tiles_on = _popcount(pile)
+            cleared = _total_tiles - _n_tiles_on - held_size
+            print(f"  [P2] step~{cleared} hs={held_size} heur_pick=t{ix.btype[heur_pick]}(tile{heur_pick}) bt_veto={bt_veto} hf_veto={hf_veto}")
+            for s_val, m in top_items[:5]:
+                r_bt_v = next(r for r, mm in reaches_bt if mm == m)
+                r_hf_v = next(r for r, mm in reaches_hf if mm == m)
+                ih = held.get(ix.btype[m], 0)
+                tag = "MATCH" if ih==2 else ("pair" if ih==1 else "new")
+                print(f"    tile{m:3d} t={ix.btype[m]:2d} ({tag}) score={int(s_val):7d} bt={r_bt_v:3d} hf={r_hf_v:3d}")
+
         if bt_veto:
+            if _DBG_DECISION:
+                print(f"  -> BT VETO: tile{best_bt[1]} t={ix.btype[best_bt[1]]}")
             return best_bt[1], "ok"
         if hf_veto and not bt_veto:
             hf_candidate = best_hf[1]
             hf_bt_reach = next(r for r, m in reaches_bt if m == hf_candidate)
             if hf_bt_reach >= heur_reach_bt:
+                if _DBG_DECISION:
+                    print(f"  -> HF VETO: tile{hf_candidate} t={ix.btype[hf_candidate]}")
                 return hf_candidate, "ok"
 
         return heur_pick, "ok"
