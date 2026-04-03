@@ -1375,7 +1375,7 @@ def _beam_search(
         s += _get_unlocks(pile, i) * 120
         s += ix.layer[i] * 120
         s += _get_depth_below(pile, i) * 70
-        s += _uncover_score(pile, held, i)
+        s += _uncover_score(pile, held, i) * 1.5
         immediate.append((s, i))
 
     if immediate:
@@ -1427,7 +1427,7 @@ def _beam_search(
         s += ix.layer[i] * 160
         s += _get_unlocks(pile, i) * 130
         s += _get_depth_below(pile, i) * 90
-        s += _uncover_score(pile, held, i)
+        s += _uncover_score(pile, held, i) * 1.5
 
         if depth > 1:
             la_coeff = 0.55
@@ -1483,6 +1483,7 @@ def _beam_search(
             hf_bt_reach = next(r for r, m in reaches_bt if m == hf_candidate)
             if hf_bt_reach >= heur_reach_bt:
                 return hf_candidate, "ok"
+
         return heur_pick, "ok"
 
     # ---- Phase 3: MCTS emergency fallback ----
