@@ -405,6 +405,60 @@ def _finish_in_three(pile: int, held: dict[int, int], held_size: int) -> bool:
 
 
 # ---------------------------------------------------------------------------
+#  Dependency-path helpers  (رسم مسار الكشف)
+# ---------------------------------------------------------------------------
+
+def _min_blockers_for_type(pile: int, btype: int) -> int:
+    """
+    أقل عدد من البلوكات الحاجبة لأي بلوكة من نوع btype لا تزال على اللوح.
+    0  = متاح فوراً
+    1  = بلوكة واحدة تحجبه
+    999 = لا يوجد بلوكات من هذا النوع أصلاً
+    """
+    ix = _level_idx  # type: ignore[union-attr]
+    mask = pile & ix.type_mask.get(btype, 0)
+    if not mask:
+        return 999
+    cb = ix.covered_by
+    best = 999
+    while mask:
+        bit = mask & -mask
+        j = bit.bit_length() - 1
+        cnt = _popcount(cb[j] & pile)
+        if cnt < best:
+            best = cnt
+            if best == 0:
+                break   # متاح فوراً، لا داعي للاستمرار
+        mask ^= bit
+    return best
+
+
+def _uncover_score(pile: int, held: dict[int, int], idx: int) -> float:
+    """
+    مكافأة الحركة *idx* بناءً على مدى اقترابها من كشف بلوكات
+    تحتاجها الأنواع الموجودة في اليد.
+    تُستخدم في التسجيل العادي وفي Tier-4.
+    """
+    ix = _level_idx  # type: ignore[union-attr]
+    new_pile = pile ^ ix.bit[idx]
+    bonus = 0.0
+
+    for t, c in held.items():
+        if c == 0 or c >= 3:
+            continue
+        before = _min_blockers_for_type(pile,     t)
+        after  = _min_blockers_for_type(new_pile, t)
+
+        if after == 0 and before > 0:
+            bonus += 3500.0   # هذه الحركة تكشف البلوكة المطلوبة مباشرة!
+        elif after < before:
+            bonus += 1200.0 * (before - after)  # اقتربنا
+        # لا تغيير أو ابتعاد = لا مكافأة
+
+    return bonus
+
+
+# ---------------------------------------------------------------------------
 #  Analysis & scoring  (logic preserved from original, data structures faster)
 # ---------------------------------------------------------------------------
 
