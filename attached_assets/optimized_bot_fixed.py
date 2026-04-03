@@ -231,10 +231,64 @@ def _clear_caches() -> None:
     _depth_cache.clear()
 
 
+_board_difficulty = 0
+
+def _compute_board_difficulty(pile: int) -> int:
+    ix = _level_idx
+    avail = ix.available_mask(pile)
+    avail_types = set()
+    for i in ix.iter_bits(avail):
+        avail_types.add(ix.btype[i])
+    n_types = len(ix.type_mask)
+    missing_types = n_types - len(avail_types)
+    total_blockers = 0
+    count = 0
+    for t, tmask in ix.type_mask.items():
+        bits = pile & tmask
+        while bits:
+            bit = bits & -bits
+            idx = bit.bit_length() - 1
+            cb = ix.covered_by[idx] & pile
+            bl = 0
+            while cb:
+                cb &= cb - 1
+                bl += 1
+            total_blockers += bl
+            count += 1
+            bits ^= bit
+    avg_blockers = total_blockers / max(count, 1)
+    hard_types = 0
+    for t, tmask in ix.type_mask.items():
+        blockers_list = []
+        bits = pile & tmask
+        while bits:
+            bit = bits & -bits
+            idx = bit.bit_length() - 1
+            cb = ix.covered_by[idx] & pile
+            bl = 0
+            while cb:
+                cb &= cb - 1
+                bl += 1
+            blockers_list.append(bl)
+            bits ^= bit
+        if len(blockers_list) >= 3:
+            blockers_list.sort()
+            if sum(blockers_list[:3]) >= 6:
+                hard_types += 1
+    score = missing_types * 3 + hard_types * 2 + int(avg_blockers * 10)
+    return score
+
+
 def _set_level(pile_blocks: list[dict]) -> None:
-    global _level_idx
+    global _level_idx, _board_difficulty
     _level_idx = LevelIndex(pile_blocks)
     _clear_caches()
+    pile = 0
+    for b in pile_blocks:
+        i = _level_idx.id_to_idx.get(b["id"])
+        if i is not None:
+            pile |= _level_idx.bit[i]
+    _board_difficulty = _compute_board_difficulty(pile)
 
 
 # ---- cached wrappers -------------------------------------------------------
@@ -1240,9 +1294,15 @@ def _beam_game_rollout(pile: int, held: dict[int, int], held_size: int,
             def _beam_key(b):
                 p, h, hs = b
                 ps = _popcount(p)
+                remaining = _get_pile_type_counts(p)
+                dead = 0
+                for t, c in h.items():
+                    if c == 2 and remaining.get(t, 0) == 0:
+                        dead += 1
                 stuck = sum(1 for t, c in h.items()
                             if 0 < c < 3 and _min_blockers_for_type(p, t) >= 3)
-                return (ps * 10 + hs * 3 + stuck * 8,)
+                pairs = sum(1 for c in h.values() if c == 2)
+                return (dead * 50 + ps * 10 + hs * 3 + stuck * 8 - pairs * 4,)
             next_beams.sort(key=_beam_key)
             next_beams = next_beams[:n_beams]
 
@@ -1361,8 +1421,9 @@ def _mcts_select(pile: int, held: dict[int, int], held_size: int,
         return None, "all_rejected_by_evaluation"
 
     scored.sort(key=lambda x: x[0], reverse=True)
-    top_n = min(6, len(scored))
-    candidates = [s[1] for s in scored[:top_n]]
+    hard_board = _board_difficulty >= 95
+    mcts_top = min(10 if hard_board else 6, len(scored))
+    candidates = [s[1] for s in scored[:mcts_top]]
 
     sims_per = max(30, n_sims // len(candidates))
 
@@ -1401,6 +1462,7 @@ def _beam_search(
     if not avail:
         return None, "no_available_on_board"
 
+    hard_board = _board_difficulty >= 95
     avail_tc = _get_avail_type_counts(pile)
     pile_size = _popcount(pile)
 
@@ -1513,8 +1575,9 @@ def _beam_search(
     if pool:
         pool.sort(key=lambda x: x[0], reverse=True)
 
-        top_n = min(6, len(pool))
-        top_items = pool[:top_n]
+        veto_top = min(10 if hard_board else 6, len(pool))
+        veto_threshold = 3
+        top_items = pool[:veto_top]
         reaches_bt = []
         reaches_hf = []
         for _, m in top_items:
@@ -1532,8 +1595,8 @@ def _beam_search(
         heur_reach_hf = next(r for r, m in reaches_hf if m == heur_pick)
         best_hf = max(reaches_hf, key=lambda x: x[0])
 
-        bt_veto = best_bt[0] >= heur_reach_bt + 3 and best_bt[1] != heur_pick
-        hf_veto = best_hf[0] >= heur_reach_hf + 3 and best_hf[1] != heur_pick
+        bt_veto = best_bt[0] >= heur_reach_bt + veto_threshold and best_bt[1] != heur_pick
+        hf_veto = best_hf[0] >= heur_reach_hf + veto_threshold and best_hf[1] != heur_pick
 
         if bt_veto:
             return best_bt[1], "ok"
@@ -1551,8 +1614,6 @@ def _beam_search(
         return p3_result
 
     # ---- Phase 4: الطوارئ الحقيقية ----
-    # كل التقييمات رفضت (موقف سيئ لكن اللعبة لم تنته بعد)
-    # جرّب أي حركة لا تخلق dead_pair ولا تسبب 7/7 فورياً
     emergency: list[int] = []
     for i in ix.iter_bits(avail):
         new_pile_e, new_held_e, new_size_e, matched_e = _simulate_pick(pile, held, held_size, i)
