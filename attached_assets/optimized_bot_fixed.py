@@ -449,10 +449,12 @@ def _uncover_score(pile: int, held: dict[int, int], idx: int) -> float:
         before = _min_blockers_for_type(pile,     t)
         after  = _min_blockers_for_type(new_pile, t)
 
+        stuck_mult = 1.5 if before >= 3 else 1.0
+
         if after == 0 and before > 0:
-            bonus += 3500.0   # هذه الحركة تكشف البلوكة المطلوبة مباشرة!
+            bonus += 3500.0 * stuck_mult
         elif after < before:
-            bonus += 1200.0 * (before - after)  # اقتربنا
+            bonus += 2000.0 * (before - after) * stuck_mult
         # لا تغيير أو ابتعاد = لا مكافأة
 
     return bonus
@@ -600,13 +602,13 @@ def _score_state(pile: int, held: dict[int, int], held_size: int) -> float:
 
 def _adaptive_depth(pile_size: int, held_size: int) -> int:
     if held_size >= 6:
-        return 4          # critical — deep search for survival
+        return 4
     if pile_size <= 20:
-        return 5          # endgame — near-exhaustive
+        return 5
     if pile_size <= 40:
         return 4
     if held_size >= 4:
-        return 3          # danger zone
+        return 3
     if pile_size <= 80:
         return 3
     if pile_size <= 130:
@@ -651,24 +653,33 @@ def _assess_post_move(
 
     btype = ix.btype[idx]
     block_count_after = new_held.get(btype, 0)
+    unc_rescue = _uncover_score(pile, held, idx)
 
-    if matched is None and new_size >= 5 and not finish_next:
-        # نتحقق: هل يوجد مخرج خلال 3 خطوات؟ إذا نعم نسمح بالحركة
-        if not _finish_in_three(new_pile, new_held, new_size):
+    stuck_in_hand = sum(1 for t, c in held.items()
+                        if 0 < c < 3 and _min_blockers_for_type(pile, t) >= 3)
+    if (matched is None and btype not in held and stuck_in_hand >= 1):
+        closest_new = _min_blockers_for_type(new_pile, btype)
+        if closest_new >= 4:
             return False, 0.0, analysis
 
-    # حالة خاصة: إضافة نوع جديد عند وجود 3+ أنواع غير مكتملة أصلاً
-    # نرفض إذا لم يكن هناك مخرج خلال 3 خطوات بعد الماتش
+    is_pair_move = (btype in held and held[btype] == 1)
+
+    if matched is None and new_size >= 5 and not finish_next:
+        if not _finish_in_three(new_pile, new_held, new_size):
+            if unc_rescue == 0 and not is_pair_move:
+                return False, 0.0, analysis
+
     if (matched is None and new_size >= 4 and not finish_next
             and btype not in held
             and sum(1 for c in held.values() if 0 < c < 3) >= 3):
         if not _finish_in_three(new_pile, new_held, new_size):
-            return False, 0.0, analysis
+            if unc_rescue == 0:
+                return False, 0.0, analysis
 
     if matched is None and block_count_after == 2 and btype not in avail_finish_types:
-        # نتحقق: هل يوجد مخرج خلال 3 خطوات؟ إذا نعم نسمح بالحركة
         if not _finish_in_three(new_pile, new_held, new_size):
-            return False, 0.0, analysis
+            if new_size <= 5:
+                return False, 0.0, analysis
 
     # ---- penalties / bonuses ----
     penalty = 0.0
@@ -692,19 +703,33 @@ def _assess_post_move(
         penalty -= max(0, open_after - 2) * 1800.0
 
     # عقوبة إضافية: إضافة نوع رابع/خامس جديد لليد المتنوعة أصلاً
-    # (النوع الجديد ليس مرئياً بشكل كافٍ للإكمال قريباً)
+    if matched is None and new_type:
+        closest_blocker = _min_blockers_for_type(new_pile, btype)
+        if closest_blocker >= 3:
+            per_blocker = 5000.0 if closest_blocker >= 5 else 3000.0
+            penalty -= closest_blocker * per_blocker
+
     if matched is None and new_type and current_open >= 3:
-        # كم مرة يظهر هذا النوع في المتاح بعد الأخذ؟
         avail_of_new_type = _popcount(_get_available(new_pile) & ix.type_mask.get(btype, 0))
-        if avail_of_new_type < 2:  # النوع الجديد غير متاح للإكمال بسرعة
+        if avail_of_new_type < 2:
             extra_diversity_pen = (current_open - 2) * 4500.0
+            if unc_rescue > 0:
+                extra_diversity_pen *= 0.4
             penalty -= extra_diversity_pen
 
     if matched is None and new_type and current_open >= 2 and new_size >= 5 and unlocks < 2 and not strong:
-        penalty -= 3500.0
+        pen_val = 3500.0
+        if unc_rescue > 0:
+            pen_val *= 0.4
+        penalty -= pen_val
 
     if new_size >= 6 and matched is None and new_type and not strong:
         penalty -= 5200.0
+
+    if is_pair_move and matched is None and stuck_in_hand >= 1:
+        board_remaining = _popcount(new_pile & ix.type_mask.get(btype, 0))
+        if board_remaining >= 1:
+            penalty += 6000.0
 
     if (
         new_size >= 6
@@ -820,6 +845,7 @@ def _lookahead(
         s += ix.layer[i] * 90
         s += _get_unlocks(pile, i) * 70
         s += _get_depth_below(pile, i) * 50
+        s += _uncover_score(pile, held, i) * 0.5
 
         if depth > 1:
             s += _lookahead(new_pile, new_held, new_size, depth - 1, beam_width) * 0.5
@@ -852,6 +878,9 @@ def _beam_search(
     avail_tc = _get_avail_type_counts(pile)
     pile_size = _popcount(pile)
 
+    stuck_types = sum(1 for t, c in held.items()
+                      if 0 < c < 3 and _min_blockers_for_type(pile, t) > 0)
+
     if depth is None:
         depth = _adaptive_depth(pile_size, held_size)
 
@@ -879,6 +908,7 @@ def _beam_search(
         s += _get_unlocks(pile, i) * 120
         s += ix.layer[i] * 120
         s += _get_depth_below(pile, i) * 70
+        s += _uncover_score(pile, held, i)
         immediate.append((s, i))
 
     if immediate:
@@ -912,19 +942,26 @@ def _beam_search(
         if in_hand == 1:
             avail_after = _get_available(new_pile)
             third = _popcount(avail_after & ix.type_mask.get(btype_i, 0))
+            board_left_t = _popcount(new_pile & ix.type_mask.get(btype_i, 0))
             if third:
-                s += 3200
-            elif _popcount(new_pile & ix.type_mask.get(btype_i, 0)):
-                s += 400
+                pair_bonus = 8000 if stuck_types >= 3 else 3200
+                s += pair_bonus
+            elif board_left_t:
+                s += 2500 if stuck_types >= 1 else 400
             else:
                 s -= 3500
 
         s += ix.layer[i] * 160
         s += _get_unlocks(pile, i) * 130
         s += _get_depth_below(pile, i) * 90
+        s += _uncover_score(pile, held, i)
 
         if depth > 1:
-            s += _lookahead(new_pile, new_held, new_size, depth - 1, beam_width) * 0.55
+            la_coeff = 0.55
+            if (matched is None and btype_i not in held
+                    and _min_blockers_for_type(new_pile, btype_i) >= 4):
+                la_coeff = 0.15
+            s += _lookahead(new_pile, new_held, new_size, depth - 1, beam_width) * la_coeff
 
         if analysis.get("dead_single_types"):
             risky_fallback.append((s, i))
@@ -952,9 +989,11 @@ def _beam_search(
     for i in ix.iter_bits(avail):
         new_pile_e, new_held_e, new_size_e, matched_e = _simulate_pick(pile, held, held_size, i)
 
-        # استبعاد صارم: موت مباشر أو خسارة مؤكدة
-        if new_size_e >= 7:
-            continue
+        if new_size_e >= 7 and matched_e is None:
+            avail_after_e2 = _get_available(new_pile_e)
+            if not any(_will_complete(ix.btype[j], new_held_e)
+                       for j in ix.iter_bits(avail_after_e2)):
+                continue
         remaining_e = _get_pile_type_counts(new_pile_e)
         analysis_e = _analyze_held(new_held_e, remaining_e)
         if analysis_e["dead_pair_types"]:
@@ -963,7 +1002,7 @@ def _beam_search(
         unlocks_e  = _get_unlocks(pile, i)
         layer_e    = ix.layer[i]
         depth_e    = _get_depth_below(pile, i)
-        base_score = unlocks_e * 200 + layer_e * 150 + depth_e * 100
+        base_score = unlocks_e * 200 + layer_e * 150 + depth_e * 100 + _uncover_score(pile, held, i)
 
         if matched_e is not None:
             # Tier 1: ماتش فوري — دائماً آمن
@@ -997,12 +1036,15 @@ def _beam_search(
         if board_left_e < need_e:
             continue  # النوع لن يكتمل أبداً — تجاهل حتى في الطوارئ
 
-        # إذا كانت اليد ≥5: نقبل فقط إذا في يدنا مسبقاً زوج أو يوجد ≥2 منه على اللوح
+        overflow_pen = 0
+        if new_size_e >= 6 and not finish_next_e:
+            overflow_pen = (new_size_e - 5) * 15000
+
         if new_size_e >= 5:
             if in_hand_e == 0 and board_left_e < 2:
-                continue  # نوع جديد ولا يكفي للإكمال
+                continue
             if in_hand_e == 1 and board_left_e < 1:
-                continue  # زوج ولا ثالث موجود
+                continue
 
         # T4a: يبقى held ≤ 5 (خطر محدود)
         # T4b: يصل held = 6 (خطر عالي — آخر ملجأ)
@@ -1030,7 +1072,7 @@ def _beam_search(
             diversity_pen = 0
             pair_bonus    = 5000
 
-        score_e = base_score + completability + escape_bonus + pair_bonus - size_pen - diversity_pen
+        score_e = base_score + completability + escape_bonus + pair_bonus - size_pen - diversity_pen - overflow_pen
 
         if new_size_e <= 5:
             tier4.append((score_e + 10000, i))   # T4a: مفضّل بشدة على T4b
