@@ -1676,10 +1676,17 @@ def _beam_search(
 
         s = _score_state(new_pile, new_held, new_size)
         s += 9000
-        s += _get_unlocks(pile, i) * 120
-        s += ix.layer[i] * 120
-        s += _get_depth_below(pile, i) * 70
-        s += _uncover_score(pile, held, i) * 1.5
+        s += _get_unlocks(pile, i) * 150
+        s += ix.layer[i] * 150
+        s += _get_depth_below(pile, i) * 100
+        s += _uncover_score(pile, held, i) * 2.0
+        avail_after_p1 = _get_available(new_pile)
+        atc_p1 = {}
+        for j in ix.iter_bits(avail_after_p1):
+            t_j = ix.btype[j]
+            atc_p1[t_j] = atc_p1.get(t_j, 0) + 1
+        ft_p1 = sum(1 for cnt in atc_p1.values() if cnt >= 3)
+        s += ft_p1 * 1200
         immediate.append((s, i))
 
     if immediate:
@@ -1687,20 +1694,14 @@ def _beam_search(
         return immediate[0][1], "ok"
 
     if held_size >= 4:
-        has_completable = False
-        remaining_hs4 = _get_pile_type_counts(pile)
-        for t, c in held.items():
-            if c <= 0:
-                continue
-            needed = 3 - c
-            if needed <= 0:
-                has_completable = True
+        can_continue = False
+        avail_tc_hs4 = _get_avail_type_counts(pile)
+        for t, cnt in avail_tc_hs4.items():
+            if cnt >= 3:
+                can_continue = True
                 break
-            if remaining_hs4.get(t, 0) >= needed:
-                has_completable = True
-                break
-        if not has_completable:
-            return None, "no_completable_triple_on_board"
+        if not can_continue:
+            return None, "no_completable_triple"
 
     if held_size >= 5 and not _fast_mode:
         mcts_result = _mcts_select(pile, held, held_size, n_sims=1200)
@@ -1749,10 +1750,22 @@ def _beam_search(
             else:
                 s -= 3500
 
+        avail_after_p2 = _get_available(new_pile)
+        avail_tc_after_p2 = {}
+        for j in ix.iter_bits(avail_after_p2):
+            t_j = ix.btype[j]
+            avail_tc_after_p2[t_j] = avail_tc_after_p2.get(t_j, 0) + 1
+        fresh_triples = sum(1 for cnt in avail_tc_after_p2.values() if cnt >= 3)
+        s += fresh_triples * 1500
+        pairs_avail = sum(1 for cnt in avail_tc_after_p2.values() if cnt == 2)
+        s += pairs_avail * 300
+        if fresh_triples == 0 and new_size >= 3:
+            s -= 3000
+
         s += ix.layer[i] * 160
-        s += _get_unlocks(pile, i) * 130
-        s += _get_depth_below(pile, i) * 90
-        unc_mult = 2.5 if hard_board else 1.5
+        s += _get_unlocks(pile, i) * 180
+        s += _get_depth_below(pile, i) * 120
+        unc_mult = 3.0 if hard_board else 2.0
         s += _uncover_score(pile, held, i) * unc_mult
 
         if depth > 1:
