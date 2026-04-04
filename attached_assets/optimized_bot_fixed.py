@@ -2319,10 +2319,11 @@ class CamelBotAddon:
             if not bot_alive:
                 if self.rid is not None and self.rid == self._halted_rid:
                     logger.info(f"[BOT] موقوف على RID الحالي {self.rid} — لن يعاد تشغيله")
+                elif len(pile_blocks) < 20:
+                    logger.info(f"[SKIP] تجاهل مستوى تعليمي ({len(pile_blocks)} كتلة < 20)")
                 else:
                     self._level += 1
                     self._step = 0
-                    # ---- build spatial index for the new level ----
                     _set_level(pile_blocks)
                     self.gs = GameState(_level_idx, pile_blocks, hand_blocks or [], storage_blks or [])  # type: ignore[arg-type]
 
