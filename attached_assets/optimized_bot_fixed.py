@@ -1876,17 +1876,7 @@ def _beam_search(
         is_pair_e = (held.get(btype_e, 0) == 1)
 
         if new_size_e >= 7 and matched_e is None:
-            if is_pair_e:
-                board_left_e = _popcount(new_pile_e & ix.type_mask.get(btype_e, 0))
-                if board_left_e > 0:
-                    avail_e7 = _get_available(new_pile_e)
-                    third_avail_e7 = _popcount(avail_e7 & ix.type_mask.get(btype_e, 0))
-                    if third_avail_e7 == 0:
-                        continue
-                else:
-                    continue
-            else:
-                continue
+            continue
 
         remaining_e = _get_pile_type_counts(new_pile_e)
         analysis_e = _analyze_held(new_held_e, remaining_e)
@@ -1939,6 +1929,8 @@ def _beam_search(
     last_resort: list[tuple[float, int]] = []
     for i in ix.iter_bits(avail):
         new_pile_lr, new_held_lr, new_size_lr, matched_lr = _simulate_pick(pile, held, held_size, i)
+        if new_size_lr >= 7 and matched_lr is None:
+            continue
         btype_lr = ix.btype[i]
         lr_score = 0.0
 
