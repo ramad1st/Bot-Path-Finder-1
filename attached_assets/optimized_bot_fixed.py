@@ -1417,17 +1417,14 @@ def _heuristic_rank(pile: int, held: dict[int, int], held_size: int,
         btype_hr7 = ix.btype[i]
         is_pair_hr7 = (held.get(btype_hr7, 0) == 1)
         if is_pair_hr7:
-            board_left_hr7 = _popcount(new_pile & ix.type_mask.get(btype_hr7, 0))
-            if board_left_hr7 > 0:
-                avail_hr7 = _get_available(new_pile)
-                third_avail_hr7 = _popcount(avail_hr7 & ix.type_mask.get(btype_hr7, 0))
-                if third_avail_hr7 == 0:
-                    mb_hr7 = _min_blockers_for_type(new_pile, btype_hr7)
-                    return -50000 - mb_hr7 * 10000
+            avail_hr7 = _get_available(new_pile)
+            third_avail_hr7 = _popcount(avail_hr7 & ix.type_mask.get(btype_hr7, 0))
+            if third_avail_hr7 > 0:
+                pass
             else:
                 return -1e9
         else:
-            return -80000
+            return -1e9
 
     if matched is None and new_size == 6:
         avail_after_hr = _get_available(new_pile)
@@ -2106,23 +2103,52 @@ def _dfs_quick_score(pile, held, held_size, i):
     if analysis.get("dead_pair_types"):
         return None, new_pile, new_held, new_size, matched
     
-    s = 0.0
+    s = _score_state(new_pile, new_held, new_size)
+
+    avail_before = _get_available(pile)
+    avail_tc = {}
+    for j in ix.iter_bits(avail_before):
+        t = ix.btype[j]
+        avail_tc[t] = avail_tc.get(t, 0) + 1
+    visible = avail_tc.get(bt, 0)
+    if ih == 0 and visible >= 3:
+        s += 5200
+    elif ih == 0 and visible == 2:
+        s += 1200
+
     if matched is not None:
-        s += 50000
-    elif ih == 1:
+        s += 7000
+    
+    stuck_types = sum(1 for t, c in held.items()
+                      if 0 < c < 3 and _min_blockers_for_type(pile, t) > 0)
+    
+    if ih == 1:
         avail_after = _get_available(new_pile)
         third = _popcount(avail_after & ix.type_mask.get(bt, 0))
-        s += 20000 + (5000 if third else 0)
-    elif ih == 0:
-        s -= 3000
-    
-    s += ix.layer[i] * 200
-    s += _get_unlocks(pile, i) * 150
-    s -= new_size * 1500
-    if new_size >= 5:
-        s -= 8000
-    elif new_size >= 4:
-        s -= 3000
+        board_left_t = _popcount(new_pile & ix.type_mask.get(bt, 0))
+        if third:
+            pair_bonus = 8000 if stuck_types >= 3 else 3200
+            s += pair_bonus
+        elif board_left_t:
+            mb = _min_blockers_for_type(new_pile, bt)
+            if mb >= 3:
+                s -= 5000
+            elif mb >= 2:
+                s += 400
+            else:
+                s += 2500
+        else:
+            s -= 3500
+
+    s += ix.layer[i] * 160
+    s += _get_unlocks(pile, i) * 130
+    s += _get_depth_below(pile, i) * 90
+    pile_size = _popcount(pile)
+    hard_board = pile_size > 150 or held_size >= 4
+    unc_mult = 2.5 if hard_board else 1.5
+    s += _uncover_score(pile, held, i) * unc_mult
+    if analysis.get("dead_single_types"):
+        s -= 5000
     return s, new_pile, new_held, new_size, matched
 
 
@@ -2165,13 +2191,13 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
             stack.append((np, nh, ns, step + 1, [], path + [bi]))
         return None
     
-    result = _dfs_plan(max_bt=3000)
+    result = _dfs_plan(max_bt=5000)
     if result:
         logger.info(f"[PLAN] DFS found complete solution ({_time.time()-t0:.1f}s)")
         return result
     
-    for noise in [200, 500, 1000, 2000]:
-        for _ in range(15):
+    for noise in [200, 500, 1000, 2000, 3000]:
+        for _ in range(25):
             if _time.time() - t0 > time_limit:
                 break
             _score_cache.clear()
@@ -2179,7 +2205,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
             bt_count = 0
             local_best = 0
             local_plan = []
-            while stack and bt_count < 400:
+            while stack and bt_count < 600:
                 p, h, hs, step, tried, path = stack[-1]
                 if p == 0 and hs == 0:
                     logger.info(f"[PLAN] Noisy DFS won n={noise} ({_time.time()-t0:.1f}s)")

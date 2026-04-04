@@ -1770,8 +1770,12 @@ def _dfs_from_state(pile, held, hs, base_steps, scorer, max_bt, ix):
     return best, False
 
 
-def multi_attempt(data: dict, max_bt: int = 5000, verbose: bool = True) -> tuple[int, bool]:
-    """Combined: beam + DFS + wide beam + noisy DFS."""
+def multi_attempt(data: dict, max_attempts: int = 5000, verbose: bool = True) -> tuple[int, bool]:
+    """Combined: beam + DFS + wide beam + massive noisy DFS restarts."""
+    import time as _time
+    t0 = _time.time()
+    time_budget = max(30, max_attempts * 0.01)
+
     bot._scoring_noise = 0.0
     bot._fast_mode = False
     bot._tabu_set = set()
@@ -1805,11 +1809,17 @@ def multi_attempt(data: dict, max_bt: int = 5000, verbose: bool = True) -> tuple
     if s_wb > best: best = s_wb
     if verbose: print(f"  wide beam: {s_wb}")
     
-    for label, scorer in [("v1", _quick_score_v1), ("v2", _quick_score_v2), ("hy", _quick_score_hybrid)]:
+    scorers = [("v1", _quick_score_v1), ("v2", _quick_score_v2), ("hy", _quick_score_hybrid)]
+    noise_levels = [200, 500, 1000, 2000, 3000, 5000]
+    
+    for label, scorer in scorers:
         ndfs_best = 0
-        for noise_level in [200, 500, 1000, 2000]:
-            s_noisy, w_noisy = solve_noisy_dfs(data, scorer, max_backtracks=400, noise=noise_level, 
-                                                num_restarts=15, verbose=False)
+        for noise_level in noise_levels:
+            if _time.time() - t0 > time_budget:
+                break
+            restarts = max(10, max_attempts // (len(scorers) * len(noise_levels)))
+            s_noisy, w_noisy = solve_noisy_dfs(data, scorer, max_backtracks=500, noise=noise_level, 
+                                                num_restarts=restarts, verbose=False)
             if w_noisy:
                 if verbose: print(f"  ✅ ndfs {label} n={noise_level}")
                 return s_noisy, True
