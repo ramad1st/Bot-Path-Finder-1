@@ -2428,6 +2428,34 @@ class CamelBotAddon:
                 held_size = self.gs.hand_size()
                 local_idx = self.gs.idx
 
+            if held_size >= 4:
+                ix_ref = _level_idx
+                if ix_ref is not None:
+                    avail_now = _get_available(pile)
+                    can_complete = False
+                    for bt, cnt in held.items():
+                        if cnt >= 2:
+                            avail_of_type = avail_now & ix_ref.type_mask.get(bt, 0)
+                            if avail_of_type:
+                                can_complete = True
+                                break
+                        elif cnt == 1:
+                            avail_of_type = _popcount(avail_now & ix_ref.type_mask.get(bt, 0))
+                            if avail_of_type >= 2:
+                                can_complete = True
+                                break
+                    
+                    if not can_complete:
+                        with self._lock:
+                            self._halted_rid = self.rid
+                            self._bot_running = False
+                        held_str = ", ".join(f"{t}x{c}" for t, c in held.items())
+                        logger.warning(
+                            f"[BOT] يد={held_size}/7 [{held_str}] ولا يوجد ثلاثية قابلة للإكمال — "
+                            f"إيقاف مبكر لهذا RID={self.rid}"
+                        )
+                        break
+
             t0 = time.time()
 
             if not planned_moves and self._step == 0:
