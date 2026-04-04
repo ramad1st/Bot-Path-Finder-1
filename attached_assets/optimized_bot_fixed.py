@@ -770,40 +770,10 @@ def _assess_post_move(
                 return False, 0.0, analysis
 
     if matched is None and new_size >= 5 and not finish_next:
-        if not _finish_in_three(new_pile, new_held, new_size):
-            if is_pair_move:
-                mb_pair = _min_blockers_for_type(new_pile, btype)
-                if mb_pair <= 1:
-                    pass
-                elif unc_rescue > 0:
-                    pass
-                else:
-                    return False, 0.0, analysis
-            elif unc_rescue == 0:
-                if not _has_via77_path(new_pile, new_held, new_size):
-                    return False, 0.0, analysis
+        return False, 0.0, analysis
 
-    if (matched is None and new_size >= 4 and not finish_next
-            and btype not in held
-            and sum(1 for c in held.values() if 0 < c < 3) >= 3):
-        if not _finish_in_three(new_pile, new_held, new_size):
-            if unc_rescue == 0:
-                if not _has_via77_path(new_pile, new_held, new_size):
-                    return False, 0.0, analysis
-
-    if matched is None and new_size == 6 and is_pair_move and not finish_next:
-        mb_pair_6 = _min_blockers_for_type(new_pile, btype)
-        if mb_pair_6 >= 2:
-            if not _has_via77_path(new_pile, new_held, new_size):
-                return False, 0.0, analysis
-
-    if matched is None and block_count_after == 2 and btype not in avail_finish_types:
-        if not _finish_in_three(new_pile, new_held, new_size):
-            if new_size <= 5:
-                return False, 0.0, analysis
-            elif new_size == 6:
-                if not _has_via77_path(new_pile, new_held, new_size):
-                    return False, 0.0, analysis
+    if matched is None and new_size >= 6:
+        return False, 0.0, analysis
 
     # ---- penalties / bonuses ----
     penalty = 0.0
@@ -1413,32 +1383,11 @@ def _heuristic_rank(pile: int, held: dict[int, int], held_size: int,
                     i: int) -> float:
     ix = _level_idx  # type: ignore[union-attr]
     new_pile, new_held, new_size, matched = _simulate_pick(pile, held, held_size, i)
-    if new_size >= 7 and matched is None:
-        btype_hr7 = ix.btype[i]
-        is_pair_hr7 = (held.get(btype_hr7, 0) == 1)
-        if is_pair_hr7:
-            avail_hr7 = _get_available(new_pile)
-            third_avail_hr7 = _popcount(avail_hr7 & ix.type_mask.get(btype_hr7, 0))
-            if third_avail_hr7 > 0:
-                pass
-            else:
-                return -1e9
-        else:
-            return -1e9
-
-    if matched is None and new_size == 6:
+    if matched is None and new_size >= 5:
         avail_after_hr = _get_available(new_pile)
-        if not any(_will_complete(ix.btype[j], new_held) for j in ix.iter_bits(avail_after_hr)):
-            btype_hr = ix.btype[i]
-            is_pair_hr = held.get(btype_hr, 0) == 1
-            if is_pair_hr:
-                mb_hr = _min_blockers_for_type(new_pile, btype_hr)
-                if mb_hr <= 1:
-                    pass
-                else:
-                    return -1e9
-            else:
-                return -1e9
+        has_exit = any(_will_complete(ix.btype[j], new_held) for j in ix.iter_bits(avail_after_hr))
+        if not has_exit:
+            return -1e9
 
     remaining = _get_pile_type_counts(new_pile)
     analysis = _analyze_held(new_held, remaining)
@@ -1901,8 +1850,13 @@ def _beam_search(
 
         em_score = ix.layer[i] * 100.0 + _get_unlocks(pile, i) * 80.0
 
+        avail_after_e = _get_available(new_pile_e)
+        has_exit_e = any(_will_complete(ix.btype[j], new_held_e) for j in ix.iter_bits(avail_after_e))
+
         if matched_e is not None:
             t1_em.append((em_score + 10000, i))
+        elif new_size_e >= 5 and not has_exit_e:
+            continue
         elif is_pair_e:
             mb_e = _min_blockers_for_type(new_pile_e, btype_e)
             if mb_e <= 1:
@@ -1912,13 +1866,13 @@ def _beam_search(
             elif new_size_e <= 5:
                 t4_em.append((em_score, i))
             else:
-                t5_em.append((em_score - mb_e * 500, i))
+                continue
         elif new_size_e <= 4:
             t3_em.append((em_score, i))
         elif new_size_e <= 5:
             t4_em.append((em_score, i))
         else:
-            t5_em.append((em_score, i))
+            continue
 
     em_pool = t1_em or t2_em or t3_em or t4_em or t5_em
     if em_pool:
@@ -1944,6 +1898,11 @@ def _beam_search(
         new_pile_lr, new_held_lr, new_size_lr, matched_lr = _simulate_pick(pile, held, held_size, i)
         if new_size_lr >= 7 and matched_lr is None:
             continue
+        if matched_lr is None and new_size_lr >= 5:
+            avail_after_lr2 = _get_available(new_pile_lr)
+            has_exit_lr2 = any(_will_complete(ix.btype[j], new_held_lr) for j in ix.iter_bits(avail_after_lr2))
+            if not has_exit_lr2:
+                continue
         btype_lr = ix.btype[i]
         lr_score = 0.0
 
