@@ -1686,6 +1686,22 @@ def _beam_search(
         immediate.sort(key=lambda x: x[0], reverse=True)
         return immediate[0][1], "ok"
 
+    if held_size >= 4:
+        has_completable = False
+        remaining_hs4 = _get_pile_type_counts(pile)
+        for t, c in held.items():
+            if c <= 0:
+                continue
+            needed = 3 - c
+            if needed <= 0:
+                has_completable = True
+                break
+            if remaining_hs4.get(t, 0) >= needed:
+                has_completable = True
+                break
+        if not has_completable:
+            return None, "no_completable_triple_on_board"
+
     if held_size >= 5 and not _fast_mode:
         mcts_result = _mcts_select(pile, held, held_size, n_sims=1200)
         if mcts_result[0] is not None:
