@@ -42,9 +42,6 @@ UID          = 398487653
 SEND_DELAY   = 0
 BEAM_WIDTH   = 16
 SEARCH_DEPTH = 6
-_scoring_noise = 0.0
-_fast_mode = False
-_tabu_set: set[tuple[int, int]] = set()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -440,6 +437,7 @@ def _finish_in_three(pile: int, held: dict[int, int], held_size: int) -> bool:
     for i in ix.iter_bits(avail):
         np1, nh1, ns1, m1 = _simulate_pick(pile, held, held_size, i)
         if m1 is not None:
+            # تحقق: الحالة بعد الماتش مستمرة؟
             if _post_match_viable(np1, nh1, ns1):
                 return True
             continue
@@ -458,6 +456,7 @@ def _finish_in_three(pile: int, held: dict[int, int], held_size: int) -> bool:
             for k in ix.iter_bits(avail3):
                 np3, nh3, ns3, m3 = _simulate_pick(np2, nh2, ns2, k)
                 if m3 is not None and ns3 < 7:
+                    # في 3 خطوات نقبل حتى بدون فحص post-match (بعيد كفاية)
                     return True
     return False
 
@@ -473,8 +472,9 @@ def _has_via77_path(pile: int, held: dict[int, int], held_size: int) -> bool:
     for j in ix.iter_bits(avail):
         np1, nh1, ns1, m1 = _simulate_pick(pile, held, held_size, j)
         if m1 is not None:
-            return True
+            return True  # ماتش مباشر
         if ns1 == 7:
+            # عند 7/7 — فحص ماتش فوري
             for k in ix.iter_bits(_get_available(np1)):
                 _, _, ns1k, m1k = _simulate_pick(np1, nh1, ns1, k)
                 if m1k is not None and ns1k < 7:
@@ -487,6 +487,7 @@ def _has_via77_path(pile: int, held: dict[int, int], held_size: int) -> bool:
             if m2 is not None:
                 return True
             if ns2 == 7:
+                # عند 7/7 في العمق الثاني — فحص ماتش
                 for l in ix.iter_bits(_get_available(np2)):
                     _, _, ns2l, m2l = _simulate_pick(np2, nh2, ns2, l)
                     if m2l is not None and ns2l < 7:
@@ -545,6 +546,7 @@ def _uncover_score(pile: int, held: dict[int, int], idx: int) -> float:
             bonus += 3500.0 * stuck_mult
         elif after < before:
             bonus += 2000.0 * (before - after) * stuck_mult
+        # لا تغيير أو ابتعاد = لا مكافأة
 
     return bonus
 
@@ -729,24 +731,18 @@ def _assess_post_move(
     ix = _level_idx  # type: ignore[union-attr]
 
     if new_size >= 7:
-        if matched is None:
-            return False, 0.0, {}
+        return False, 0.0, {}
 
     remaining = _get_pile_type_counts(new_pile)
     analysis = _analyze_held(new_held, remaining)
 
     if analysis["dead_pair_types"]:
-        if new_size >= 7:
-            return False, 0.0, analysis
-        dead_count = len(analysis["dead_pair_types"])
-        if dead_count >= 2:
-            return False, 0.0, analysis
-        if held_size >= 5:
-            return False, 0.0, analysis
+        return False, 0.0, analysis
 
     if _violates_endgame(new_pile, new_held, new_size) and matched is None:
         return False, 0.0, analysis
 
+    # compute helper values
     avail_after = _get_available(new_pile)
     avail_finish_types: set[int] = set()
     for i in ix.iter_bits(avail_after):
@@ -760,50 +756,32 @@ def _assess_post_move(
 
     stuck_in_hand = sum(1 for t, c in held.items()
                         if 0 < c < 3 and _min_blockers_for_type(pile, t) >= 3)
-
-    is_pair_move = (btype in held and held[btype] == 1)
-
     if (matched is None and btype not in held and stuck_in_hand >= 1):
         closest_new = _min_blockers_for_type(new_pile, btype)
         if closest_new >= 4:
-            if not (is_pair_move or finish_next or _has_via77_path(new_pile, new_held, new_size)):
-                return False, 0.0, analysis
+            return False, 0.0, analysis
+
+    is_pair_move = (btype in held and held[btype] == 1)
 
     if matched is None and new_size >= 5 and not finish_next:
         if not _finish_in_three(new_pile, new_held, new_size):
-            if is_pair_move:
-                mb_pair = _min_blockers_for_type(new_pile, btype)
-                if mb_pair <= 1:
-                    pass
-                elif unc_rescue > 0:
-                    pass
-                else:
-                    return False, 0.0, analysis
-            elif unc_rescue == 0:
-                if not _has_via77_path(new_pile, new_held, new_size):
-                    return False, 0.0, analysis
+            if unc_rescue == 0 and not is_pair_move:
+                return False, 0.0, analysis
 
     if (matched is None and new_size >= 4 and not finish_next
             and btype not in held
             and sum(1 for c in held.values() if 0 < c < 3) >= 3):
         if not _finish_in_three(new_pile, new_held, new_size):
             if unc_rescue == 0:
-                if not _has_via77_path(new_pile, new_held, new_size):
-                    return False, 0.0, analysis
+                return False, 0.0, analysis
 
     if matched is None and new_size == 6 and is_pair_move and not finish_next:
-        mb_pair_6 = _min_blockers_for_type(new_pile, btype)
-        if mb_pair_6 >= 2:
-            if not _has_via77_path(new_pile, new_held, new_size):
-                return False, 0.0, analysis
+        return False, 0.0, analysis
 
     if matched is None and block_count_after == 2 and btype not in avail_finish_types:
         if not _finish_in_three(new_pile, new_held, new_size):
-            if new_size <= 5:
+            if new_size <= 6:
                 return False, 0.0, analysis
-            elif new_size == 6:
-                if not _has_via77_path(new_pile, new_held, new_size):
-                    return False, 0.0, analysis
 
     # ---- penalties / bonuses ----
     penalty = 0.0
@@ -887,35 +865,6 @@ def _assess_post_move(
         penalty -= 900.0
     if matched is None and new_size == 5 and finish_next:
         penalty -= 600.0
-
-    pair_types_in_hand = [t for t, c in new_held.items() if c == 2]
-    if pair_types_in_hand and matched is None:
-        reveals_pair_target = False
-        uncovered_by_move = ix.covers[idx] & new_pile
-        bits_tmp = uncovered_by_move
-        while bits_tmp:
-            bit_t = bits_tmp & -bits_tmp
-            child_idx = bit_t.bit_length() - 1
-            if ix.covered_by[child_idx] & new_pile == 0:
-                child_type = ix.btype[child_idx]
-                if child_type in pair_types_in_hand:
-                    reveals_pair_target = True
-                    break
-            bits_tmp ^= bit_t
-        no_pair_avail = True
-        for pt in pair_types_in_hand:
-            if _popcount(avail_after & ix.type_mask.get(pt, 0)) > 0:
-                no_pair_avail = False
-                break
-        if reveals_pair_target:
-            bonus_reveal = 3000.0
-            if no_pair_avail:
-                bonus_reveal += 2000.0
-            if new_size >= 5:
-                bonus_reveal += 2000.0
-            penalty += bonus_reveal
-        if no_pair_avail and new_size >= 5 and not reveals_pair_target:
-            penalty -= 2500.0
 
     return True, penalty, analysis
 
@@ -1095,10 +1044,11 @@ def _mc_rollout(pile: int, held: dict[int, int], held_size: int,
                 else:
                     tier5.append(i)
 
+        # ---- اختيار الـ pool حسب حجم اليد ----
         if held_size >= 6:
-            pool = tier1 or tier2
+            pool = tier1
         elif held_size >= 5:
-            pool = tier1 or tier2 or tier3
+            pool = tier1 or tier2
         elif held_size >= 4:
             pool = tier1 or tier2 or tier3
         elif held_size >= 2:
@@ -1108,24 +1058,27 @@ def _mc_rollout(pile: int, held: dict[int, int], held_size: int,
             pool = tier1 + tier2 + tier3 + tier4 + tier5
 
         if not pool:
-            all_avail_list = list(_iter(avail))
-            safe_pool = []
-            for i in all_avail_list:
-                bt_ch = _btype[i]
-                c_ch = held.get(bt_ch, 0)
-                pile_after = pile ^ _bit[i]
-                board_rest = _popcount(pile_after & _tmask.get(bt_ch, 0))
-                if c_ch == 1 and board_rest == 0:
-                    continue
-                if c_ch == 0 and board_rest < 2:
-                    continue
-                if c_ch + 1 >= 3:
-                    safe_pool.append(i)
-                elif held_size + 1 < 7:
-                    safe_pool.append(i)
-            if not safe_pool:
+            if held_size <= 5:
+                all_avail_list = list(_iter(avail))
+                safe_pool = []
+                for i in all_avail_list:
+                    bt_ch = _btype[i]
+                    c_ch = held.get(bt_ch, 0)
+                    pile_after = pile ^ _bit[i]
+                    board_rest = _popcount(pile_after & _tmask.get(bt_ch, 0))
+                    if c_ch == 1 and board_rest == 0:
+                        continue
+                    if c_ch == 0 and board_rest < 2:
+                        continue
+                    if c_ch + 1 >= 3:
+                        safe_pool.append(i)
+                    elif held_size + 1 < 7:
+                        safe_pool.append(i)
+                if not safe_pool:
+                    break
+                pool = safe_pool
+            else:
                 break
-            pool = safe_pool
         chosen = random.choice(pool)
 
         pile ^= _bit[chosen]
@@ -1414,34 +1367,13 @@ def _heuristic_rank(pile: int, held: dict[int, int], held_size: int,
     ix = _level_idx  # type: ignore[union-attr]
     new_pile, new_held, new_size, matched = _simulate_pick(pile, held, held_size, i)
     if new_size >= 7 and matched is None:
-        btype_hr7 = ix.btype[i]
-        is_pair_hr7 = (held.get(btype_hr7, 0) == 1)
-        if is_pair_hr7:
-            board_left_hr7 = _popcount(new_pile & ix.type_mask.get(btype_hr7, 0))
-            if board_left_hr7 > 0:
-                avail_hr7 = _get_available(new_pile)
-                third_avail_hr7 = _popcount(avail_hr7 & ix.type_mask.get(btype_hr7, 0))
-                if third_avail_hr7 == 0:
-                    mb_hr7 = _min_blockers_for_type(new_pile, btype_hr7)
-                    return -50000 - mb_hr7 * 10000
-            else:
-                return -1e9
-        else:
-            return -80000
+        return -1e9
 
+    # نفس حظر _assess_post_move: 6/7 بدون ماتش متاح = deadlock
     if matched is None and new_size == 6:
         avail_after_hr = _get_available(new_pile)
         if not any(_will_complete(ix.btype[j], new_held) for j in ix.iter_bits(avail_after_hr)):
-            btype_hr = ix.btype[i]
-            is_pair_hr = held.get(btype_hr, 0) == 1
-            if is_pair_hr:
-                mb_hr = _min_blockers_for_type(new_pile, btype_hr)
-                if mb_hr <= 1:
-                    pass
-                else:
-                    return -1e9
-            else:
-                return -1e9
+            return -1e9
 
     remaining = _get_pile_type_counts(new_pile)
     analysis = _analyze_held(new_held, remaining)
@@ -1536,105 +1468,6 @@ def _mcts_select(pile: int, held: dict[int, int], held_size: int,
 #  Beam search — main entry point (heuristic + MCTS tiebreaker)
 # ---------------------------------------------------------------------------
 
-def _pair_completion_plan(
-    pile: int,
-    held: dict[int, int],
-    held_size: int,
-    avail: int,
-) -> Optional[int]:
-    """Find a move that directly progresses toward completing a pair in hand.
-    Returns block index or None.
-    
-    Strategy:
-    1. If a pair type has third available -> pick the second (or third) tile 
-    2. If a pair type has third 1 blocker away -> pick the blocker
-    3. If a single type has two more available -> pick one
-    """
-    ix = _level_idx  # type: ignore[union-attr]
-    
-    best_move = None
-    best_priority = -1
-    
-    for t, c in held.items():
-        if c != 1 and c != 2:
-            continue
-        
-        tmask = ix.type_mask.get(t, 0)
-        avail_of_t = avail & tmask & pile
-        avail_count = _popcount(avail_of_t)
-        
-        if c == 1 and avail_count >= 1:
-            for i in ix.iter_bits(avail_of_t):
-                new_pile_p = pile ^ ix.bit[i]
-                avail_after_p = _get_available(new_pile_p)
-                third_count = _popcount(avail_after_p & tmask & new_pile_p)
-                if third_count > 0:
-                    priority = 100 + ix.layer[i]
-                    if priority > best_priority:
-                        new_pile_t, new_held_t, new_size_t, matched_t = _simulate_pick(pile, held, held_size, i)
-                        if new_size_t < 7 or matched_t is not None:
-                            remaining_t = _get_pile_type_counts(new_pile_t)
-                            analysis_t = _analyze_held(new_held_t, remaining_t)
-                            if not analysis_t["dead_pair_types"]:
-                                best_priority = priority
-                                best_move = i
-        
-        if c == 2 and avail_count >= 1:
-            for i in ix.iter_bits(avail_of_t):
-                priority = 200 + ix.layer[i]
-                if priority > best_priority:
-                    best_priority = priority
-                    best_move = i
-        
-        if c == 1 and avail_count == 0:
-            board_of_t = pile & tmask
-            if not board_of_t:
-                continue
-            for tile_j in ix.iter_bits(board_of_t):
-                blockers = ix.covered_by[tile_j] & pile
-                if _popcount(blockers) == 1:
-                    blocker_idx = (blockers & -blockers).bit_length() - 1
-                    if avail & ix.bit[blocker_idx]:
-                        new_pile_b, new_held_b, new_size_b, matched_b = _simulate_pick(pile, held, held_size, blocker_idx)
-                        if new_size_b >= 7 and matched_b is None:
-                            continue
-                        remaining_b = _get_pile_type_counts(new_pile_b)
-                        analysis_b = _analyze_held(new_held_b, remaining_b)
-                        if analysis_b["dead_pair_types"]:
-                            continue
-                        blocker_type = ix.btype[blocker_idx]
-                        blocker_in_hand = new_held_b.get(blocker_type, 0)
-                        priority = 50 + ix.layer[blocker_idx]
-                        if blocker_in_hand == 2:
-                            priority += 30
-                        if priority > best_priority:
-                            best_priority = priority
-                            best_move = blocker_idx
-        
-        if c == 2 and avail_count == 0:
-            board_of_t = pile & tmask
-            if not board_of_t:
-                continue
-            for tile_j in ix.iter_bits(board_of_t):
-                blockers = ix.covered_by[tile_j] & pile
-                if _popcount(blockers) == 1:
-                    blocker_idx = (blockers & -blockers).bit_length() - 1
-                    if avail & ix.bit[blocker_idx]:
-                        new_pile_b, new_held_b, new_size_b, matched_b = _simulate_pick(pile, held, held_size, blocker_idx)
-                        if new_size_b >= 7 and matched_b is None:
-                            continue
-                        remaining_b = _get_pile_type_counts(new_pile_b)
-                        analysis_b = _analyze_held(new_held_b, remaining_b)
-                        if analysis_b["dead_pair_types"]:
-                            continue
-                        priority = 80 + ix.layer[blocker_idx]
-                        if priority > best_priority:
-                            best_priority = priority
-                            best_move = blocker_idx
-    
-    return best_move
-
-
 def _beam_search(
     pile: int,
     held: dict[int, int],
@@ -1656,7 +1489,7 @@ def _beam_search(
                       if 0 < c < 3 and _min_blockers_for_type(pile, t) > 0)
 
     if depth is None:
-        depth = 2 if _fast_mode else _adaptive_depth(pile_size, held_size)
+        depth = _adaptive_depth(pile_size, held_size)
 
     # ---- Phase 1: immediate match completions ---
     immediate: list[tuple[float, int]] = []
@@ -1689,12 +1522,7 @@ def _beam_search(
         immediate.sort(key=lambda x: x[0], reverse=True)
         return immediate[0][1], "ok"
 
-    if held_size >= 5 and not _fast_mode:
-        mcts_result = _mcts_select(pile, held, held_size, n_sims=1200)
-        if mcts_result[0] is not None:
-            return mcts_result
-
-    # ---- Phase 2: general moves (heuristic + lookahead) ---
+    # ---- Phase 2: general moves (heuristic + MCTS tiebreaker for close calls) ---
     scored: list[tuple[float, int]]       = []
     risky_fallback: list[tuple[float, int]] = []
 
@@ -1749,12 +1577,6 @@ def _beam_search(
                 la_coeff = 0.15
             s += _lookahead(new_pile, new_held, new_size, depth - 1, beam_width) * la_coeff
 
-        if _scoring_noise > 0:
-            s += random.gauss(0, _scoring_noise)
-
-        if _tabu_set and (pile, i) in _tabu_set:
-            s -= 100000
-
         if analysis.get("dead_single_types"):
             risky_fallback.append((s, i))
         else:
@@ -1762,35 +1584,8 @@ def _beam_search(
 
     pool = scored if scored else risky_fallback
 
-    pair_types_bs = [t for t, c in held.items() if c == 2]
-    if pair_types_bs and held_size >= 4:
-        no_pair_match_bs = True
-        for pt_bs in pair_types_bs:
-            if _popcount(avail & ix.type_mask.get(pt_bs, 0)) > 0:
-                no_pair_match_bs = False
-                break
-        if no_pair_match_bs and pool:
-            reveal_pool = []
-            for s_bs, i_bs in pool:
-                uncov_bs = ix.covers[i_bs] & (pile & ~(1 << i_bs))
-                bits_bs = uncov_bs
-                reveals_bs = False
-                while bits_bs:
-                    bit_bs = bits_bs & -bits_bs
-                    ci_bs = bit_bs.bit_length() - 1
-                    p_after = pile & ~(1 << i_bs)
-                    if ix.covered_by[ci_bs] & p_after == 0:
-                        if ix.btype[ci_bs] in pair_types_bs:
-                            reveals_bs = True
-                            break
-                    bits_bs ^= bit_bs
-                if reveals_bs:
-                    reveal_pool.append((s_bs + 5000, i_bs))
-            if reveal_pool:
-                pool = reveal_pool
-
     current_singles = sum(1 for c in held.values() if c == 1)
-    if current_singles >= 3 or held_size >= 5:
+    if current_singles >= 3:
         pair_scored = [(s, i) for s, i in scored if held.get(ix.btype[i], 0) == 1]
         pair_risky  = [(s, i) for s, i in risky_fallback if held.get(ix.btype[i], 0) == 1]
         pair_pool = pair_scored if pair_scored else pair_risky
@@ -1800,8 +1595,6 @@ def _beam_search(
     if pool:
         pool.sort(key=lambda x: x[0], reverse=True)
 
-        if _fast_mode:
-            return pool[0][1], "ok"
         veto_top = min(10 if hard_board else 6, len(pool))
         veto_threshold = 2 if hard_board else 3
         top_items = pool[:veto_top]
@@ -1850,81 +1643,26 @@ def _beam_search(
 
         return heur_pick, "ok"
 
-    if _fast_mode:
-        return None, "fast_mode_no_move"
     # ---- Phase 3: MCTS emergency fallback ----
     p3_result = _mcts_select(pile, held, held_size)
     if p3_result[0] is not None:
         return p3_result
 
-    # ---- Phase 4: الطوارئ الحقيقية — نظام أولويات متعدد المستويات ----
-    # T1: ماتش فوري (يفرّغ مكان باليد)
-    # T2: pair move والثالثة قريبة (min_blockers <= 1)
-    # T3: أي حركة تبقي اليد <= 4
-    # T4: أي حركة تبقي اليد <= 5
-    # T5: أي حركة تبقي اليد <= 6 (ما عدا dead_pair)
-    t1_em: list[tuple[float, int]] = []
-    t2_em: list[tuple[float, int]] = []
-    t3_em: list[tuple[float, int]] = []
-    t4_em: list[tuple[float, int]] = []
-    t5_em: list[tuple[float, int]] = []
-
+    # ---- Phase 4: الطوارئ الحقيقية ----
+    emergency: list[int] = []
     for i in ix.iter_bits(avail):
         new_pile_e, new_held_e, new_size_e, matched_e = _simulate_pick(pile, held, held_size, i)
-
-        btype_e = ix.btype[i]
-        is_pair_e = (held.get(btype_e, 0) == 1)
-
         if new_size_e >= 7 and matched_e is None:
-            if is_pair_e:
-                board_left_e = _popcount(new_pile_e & ix.type_mask.get(btype_e, 0))
-                if board_left_e > 0:
-                    avail_e7 = _get_available(new_pile_e)
-                    third_avail_e7 = _popcount(avail_e7 & ix.type_mask.get(btype_e, 0))
-                    if third_avail_e7 == 0:
-                        continue
-                else:
-                    continue
-            else:
-                continue
+            continue
+        if _analyze_held(new_held_e, _get_pile_type_counts(new_pile_e))["dead_pair_types"]:
+            continue
+        emergency.append(i)
 
-        remaining_e = _get_pile_type_counts(new_pile_e)
-        analysis_e = _analyze_held(new_held_e, remaining_e)
-        if analysis_e["dead_pair_types"]:
-            if new_size_e >= 7:
-                continue
-            if len(analysis_e["dead_pair_types"]) >= 2:
-                continue
-
-        em_score = ix.layer[i] * 100.0 + _get_unlocks(pile, i) * 80.0
-
-        if matched_e is not None:
-            t1_em.append((em_score + 10000, i))
-        elif is_pair_e:
-            mb_e = _min_blockers_for_type(new_pile_e, btype_e)
-            if mb_e <= 1:
-                t2_em.append((em_score + 5000, i))
-            elif new_size_e <= 4:
-                t3_em.append((em_score, i))
-            elif new_size_e <= 5:
-                t4_em.append((em_score, i))
-            else:
-                t5_em.append((em_score - mb_e * 500, i))
-        elif new_size_e <= 4:
-            t3_em.append((em_score, i))
-        elif new_size_e <= 5:
-            t4_em.append((em_score, i))
-        else:
-            t5_em.append((em_score, i))
-
-    em_pool = t1_em or t2_em or t3_em or t4_em or t5_em
-    if em_pool:
-        em_pool.sort(key=lambda x: x[0], reverse=True)
-        em_candidates = [m for _, m in em_pool[:8]]
-        sims = max(30, 400 // len(em_candidates))
+    if emergency:
+        sims = max(20, 200 // len(emergency))
         best_avg = -1.0
         best_move = None
-        for m in em_candidates:
+        for m in emergency:
             np_e, nh_e, ns_e, _ = _simulate_pick(pile, held, held_size, m)
             total = 0
             for _ in range(sims):
@@ -1935,51 +1673,6 @@ def _beam_search(
                 best_move = m
         if best_move is not None:
             return best_move, "ok"
-
-    last_resort: list[tuple[float, int]] = []
-    for i in ix.iter_bits(avail):
-        new_pile_lr, new_held_lr, new_size_lr, matched_lr = _simulate_pick(pile, held, held_size, i)
-        btype_lr = ix.btype[i]
-        lr_score = 0.0
-
-        if matched_lr is not None:
-            lr_score += 50000
-        elif held.get(btype_lr, 0) == 1:
-            board_left_lr = _popcount(new_pile_lr & ix.type_mask.get(btype_lr, 0))
-            lr_score += 10000 + board_left_lr * 500
-            avail_lr = _get_available(new_pile_lr)
-            third_avail_lr = _popcount(avail_lr & ix.type_mask.get(btype_lr, 0))
-            if third_avail_lr > 0:
-                lr_score += 20000
-            else:
-                mb_lr = _min_blockers_for_type(new_pile_lr, btype_lr)
-                lr_score += max(0, 5000 - mb_lr * 1000)
-        elif held.get(btype_lr, 0) == 2:
-            lr_score += 40000
-        else:
-            lr_score -= 5000
-
-        lr_score += ix.layer[i] * 50.0
-        lr_score += _get_unlocks(pile, i) * 100.0
-        last_resort.append((lr_score, i))
-
-    if last_resort:
-        last_resort.sort(key=lambda x: x[0], reverse=True)
-        lr_candidates = [m for _, m in last_resort[:6]]
-        sims_lr = max(20, 200 // len(lr_candidates))
-        best_avg_lr = -1.0
-        best_move_lr = None
-        for m in lr_candidates:
-            np_lr, nh_lr, ns_lr, _ = _simulate_pick(pile, held, held_size, m)
-            total_lr = 0
-            for _ in range(sims_lr):
-                total_lr += 1 + _mc_rollout(np_lr, dict(nh_lr), ns_lr)
-            avg_lr = total_lr / sims_lr
-            if avg_lr > best_avg_lr:
-                best_avg_lr = avg_lr
-                best_move_lr = m
-        if best_move_lr is not None:
-            return best_move_lr, "ok"
 
     return None, "all_rejected_by_evaluation"
 
@@ -2096,127 +1789,6 @@ def flush_queue(q: asyncio.Queue) -> int:
         except asyncio.QueueEmpty:
             break
     return count
-
-
-# ---------------------------------------------------------------------------
-#  DFS-based Solution Pre-Planner
-# ---------------------------------------------------------------------------
-
-def _dfs_quick_score(pile, held, held_size, i):
-    ix = _level_idx
-    bt = ix.btype[i]
-    ih = held.get(bt, 0)
-    new_pile, new_held, new_size, matched = _simulate_pick(pile, held, held_size, i)
-    if new_size >= 7 and matched is None:
-        return None, new_pile, new_held, new_size, matched
-    remaining = _get_pile_type_counts(new_pile)
-    analysis = _analyze_held(new_held, remaining)
-    if analysis.get("dead_pair_types"):
-        return None, new_pile, new_held, new_size, matched
-    
-    s = 0.0
-    if matched is not None:
-        s += 50000
-    elif ih == 1:
-        avail_after = _get_available(new_pile)
-        third = _popcount(avail_after & ix.type_mask.get(bt, 0))
-        s += 20000 + (5000 if third else 0)
-    elif ih == 0:
-        s -= 3000
-    
-    s += ix.layer[i] * 200
-    s += _get_unlocks(pile, i) * 150
-    s -= new_size * 1500
-    if new_size >= 5:
-        s -= 8000
-    elif new_size >= 4:
-        s -= 3000
-    return s, new_pile, new_held, new_size, matched
-
-
-def _plan_solution(pile, held, held_size, time_limit=8.0):
-    ix = _level_idx
-    if ix is None:
-        return []
-    
-    import time as _time
-    t0 = _time.time()
-    
-    best_plan = []
-    best_steps = 0
-    
-    def _dfs_plan(max_bt=3000):
-        nonlocal best_plan, best_steps
-        stack = [(pile, dict(held), held_size, 0, [], [])]
-        bt = 0
-        while stack and bt < max_bt:
-            p, h, hs, step, tried, path = stack[-1]
-            if p == 0 and hs == 0:
-                return path[:]
-            if step > best_steps:
-                best_steps = step
-                best_plan = path[:]
-            avail = _get_available(p)
-            if not avail:
-                stack.pop(); bt += 1; continue
-            cands = []
-            for i in ix.iter_bits(avail):
-                if i in tried: continue
-                r = _dfs_quick_score(p, h, hs, i)
-                if r[0] is None: continue
-                cands.append((r[0], i, r[1], r[2], r[3], r[4]))
-            if not cands:
-                stack.pop(); bt += 1; continue
-            cands.sort(key=lambda x: x[0], reverse=True)
-            sc, bi, np, nh, ns, m = cands[0]
-            tried.append(bi)
-            stack.append((np, nh, ns, step + 1, [], path + [bi]))
-        return None
-    
-    result = _dfs_plan(max_bt=3000)
-    if result:
-        logger.info(f"[PLAN] DFS found complete solution ({_time.time()-t0:.1f}s)")
-        return result
-    
-    for noise in [200, 500, 1000, 2000]:
-        for _ in range(15):
-            if _time.time() - t0 > time_limit:
-                break
-            _score_cache.clear()
-            stack = [(pile, dict(held), held_size, 0, [], [])]
-            bt_count = 0
-            local_best = 0
-            local_plan = []
-            while stack and bt_count < 400:
-                p, h, hs, step, tried, path = stack[-1]
-                if p == 0 and hs == 0:
-                    logger.info(f"[PLAN] Noisy DFS won n={noise} ({_time.time()-t0:.1f}s)")
-                    return path
-                if step > local_best:
-                    local_best = step
-                    local_plan = path[:]
-                avail = _get_available(p)
-                if not avail:
-                    stack.pop(); bt_count += 1; continue
-                cands = []
-                for i in ix.iter_bits(avail):
-                    if i in tried: continue
-                    r = _dfs_quick_score(p, h, hs, i)
-                    if r[0] is None: continue
-                    sc = r[0] + random.gauss(0, noise)
-                    cands.append((sc, i, r[1], r[2], r[3], r[4]))
-                if not cands:
-                    stack.pop(); bt_count += 1; continue
-                cands.sort(key=lambda x: x[0], reverse=True)
-                sc, bi, np, nh, ns, m = cands[0]
-                tried.append(bi)
-                stack.append((np, nh, ns, step + 1, [], path + [bi]))
-            if local_best > best_steps:
-                best_steps = local_best
-                best_plan = local_plan
-    
-    logger.info(f"[PLAN] Best solution: {best_steps} steps ({_time.time()-t0:.1f}s)")
-    return best_plan
 
 
 # ---------------------------------------------------------------------------
@@ -2408,9 +1980,6 @@ class CamelBotAddon:
         logger.info(f"[BOT] بدء المستوى {self._level} | RID={self.rid}")
         logger.info("=" * 50)
 
-        planned_moves = []
-        plan_idx = 0
-
         while self._bot_running:
             with self._lock:
                 gs_ready = self.gs is not None and self._flow is not None
@@ -2429,31 +1998,7 @@ class CamelBotAddon:
                 local_idx = self.gs.idx
 
             t0 = time.time()
-
-            if not planned_moves and self._step == 0:
-                logger.info("[BOT] Pre-planning solution with DFS...")
-                planned_moves = _plan_solution(pile, held, held_size, time_limit=12.0)
-                plan_idx = 0
-                logger.info(f"[BOT] Plan: {len(planned_moves)} moves")
-
-            block_idx = None
-            fail_reason = ""
-
-            if plan_idx < len(planned_moves):
-                candidate = planned_moves[plan_idx]
-                ix = _level_idx
-                avail_mask = _get_available(pile) if ix else 0
-                if ix and (avail_mask & ix.bit[candidate]):
-                    block_idx = candidate
-                    plan_idx += 1
-                else:
-                    logger.info(f"[BOT] Plan deviated at step {self._step}, falling back to beam search")
-                    planned_moves = []
-                    plan_idx = 0
-
-            if block_idx is None:
-                block_idx, fail_reason = _beam_search(pile, held, held_size)
-
+            block_idx, fail_reason = _beam_search(pile, held, held_size)
             dt = time.time() - t0
 
             if block_idx is None:
@@ -2493,10 +2038,9 @@ class CamelBotAddon:
                 self._queue.put_nowait((flow_ref, packet, step_n == 1, rid_snap))
 
             match_str = " -> ماتش!" if matched is not None else ""
-            src = "PLAN" if plan_idx > 0 and plan_idx <= len(planned_moves) else "BEAM"
             logger.info(
                 f"خطوة {step_n:3d}: نوع={block['type']:2d} | طبقة={block['layer']} | "
-                f"يد={hand_sz}/7 | باقي={pile_left} | {dt:.3f}s | {src}{match_str}"
+                f"يد={hand_sz}/7 | باقي={pile_left} | {dt:.3f}s{match_str}"
             )
 
             time.sleep(SEND_DELAY)

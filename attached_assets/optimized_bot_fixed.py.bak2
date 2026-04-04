@@ -44,7 +44,6 @@ BEAM_WIDTH   = 16
 SEARCH_DEPTH = 6
 _scoring_noise = 0.0
 _fast_mode = False
-_tabu_set: set[tuple[int, int]] = set()
 
 logging.basicConfig(
     level=logging.INFO,
@@ -729,8 +728,24 @@ def _assess_post_move(
     ix = _level_idx  # type: ignore[union-attr]
 
     if new_size >= 7:
-        if matched is None:
-            return False, 0.0, {}
+        if matched is not None:
+            pass
+        else:
+            btype_7 = ix.btype[idx]
+            is_pair_7 = (held.get(btype_7, 0) == 1)
+            if is_pair_7:
+                board_left_7 = _popcount(new_pile & ix.type_mask.get(btype_7, 0))
+                if board_left_7 > 0:
+                    avail_7 = _get_available(new_pile)
+                    third_avail_7 = _popcount(avail_7 & ix.type_mask.get(btype_7, 0))
+                    if third_avail_7 > 0:
+                        pass
+                    else:
+                        return False, 0.0, {}
+                else:
+                    return False, 0.0, {}
+            else:
+                return False, 0.0, {}
 
     remaining = _get_pile_type_counts(new_pile)
     analysis = _analyze_held(new_held, remaining)
@@ -1752,9 +1767,6 @@ def _beam_search(
         if _scoring_noise > 0:
             s += random.gauss(0, _scoring_noise)
 
-        if _tabu_set and (pile, i) in _tabu_set:
-            s -= 100000
-
         if analysis.get("dead_single_types"):
             risky_fallback.append((s, i))
         else:
@@ -2099,127 +2111,6 @@ def flush_queue(q: asyncio.Queue) -> int:
 
 
 # ---------------------------------------------------------------------------
-#  DFS-based Solution Pre-Planner
-# ---------------------------------------------------------------------------
-
-def _dfs_quick_score(pile, held, held_size, i):
-    ix = _level_idx
-    bt = ix.btype[i]
-    ih = held.get(bt, 0)
-    new_pile, new_held, new_size, matched = _simulate_pick(pile, held, held_size, i)
-    if new_size >= 7 and matched is None:
-        return None, new_pile, new_held, new_size, matched
-    remaining = _get_pile_type_counts(new_pile)
-    analysis = _analyze_held(new_held, remaining)
-    if analysis.get("dead_pair_types"):
-        return None, new_pile, new_held, new_size, matched
-    
-    s = 0.0
-    if matched is not None:
-        s += 50000
-    elif ih == 1:
-        avail_after = _get_available(new_pile)
-        third = _popcount(avail_after & ix.type_mask.get(bt, 0))
-        s += 20000 + (5000 if third else 0)
-    elif ih == 0:
-        s -= 3000
-    
-    s += ix.layer[i] * 200
-    s += _get_unlocks(pile, i) * 150
-    s -= new_size * 1500
-    if new_size >= 5:
-        s -= 8000
-    elif new_size >= 4:
-        s -= 3000
-    return s, new_pile, new_held, new_size, matched
-
-
-def _plan_solution(pile, held, held_size, time_limit=8.0):
-    ix = _level_idx
-    if ix is None:
-        return []
-    
-    import time as _time
-    t0 = _time.time()
-    
-    best_plan = []
-    best_steps = 0
-    
-    def _dfs_plan(max_bt=3000):
-        nonlocal best_plan, best_steps
-        stack = [(pile, dict(held), held_size, 0, [], [])]
-        bt = 0
-        while stack and bt < max_bt:
-            p, h, hs, step, tried, path = stack[-1]
-            if p == 0 and hs == 0:
-                return path[:]
-            if step > best_steps:
-                best_steps = step
-                best_plan = path[:]
-            avail = _get_available(p)
-            if not avail:
-                stack.pop(); bt += 1; continue
-            cands = []
-            for i in ix.iter_bits(avail):
-                if i in tried: continue
-                r = _dfs_quick_score(p, h, hs, i)
-                if r[0] is None: continue
-                cands.append((r[0], i, r[1], r[2], r[3], r[4]))
-            if not cands:
-                stack.pop(); bt += 1; continue
-            cands.sort(key=lambda x: x[0], reverse=True)
-            sc, bi, np, nh, ns, m = cands[0]
-            tried.append(bi)
-            stack.append((np, nh, ns, step + 1, [], path + [bi]))
-        return None
-    
-    result = _dfs_plan(max_bt=3000)
-    if result:
-        logger.info(f"[PLAN] DFS found complete solution ({_time.time()-t0:.1f}s)")
-        return result
-    
-    for noise in [200, 500, 1000, 2000]:
-        for _ in range(15):
-            if _time.time() - t0 > time_limit:
-                break
-            _score_cache.clear()
-            stack = [(pile, dict(held), held_size, 0, [], [])]
-            bt_count = 0
-            local_best = 0
-            local_plan = []
-            while stack and bt_count < 400:
-                p, h, hs, step, tried, path = stack[-1]
-                if p == 0 and hs == 0:
-                    logger.info(f"[PLAN] Noisy DFS won n={noise} ({_time.time()-t0:.1f}s)")
-                    return path
-                if step > local_best:
-                    local_best = step
-                    local_plan = path[:]
-                avail = _get_available(p)
-                if not avail:
-                    stack.pop(); bt_count += 1; continue
-                cands = []
-                for i in ix.iter_bits(avail):
-                    if i in tried: continue
-                    r = _dfs_quick_score(p, h, hs, i)
-                    if r[0] is None: continue
-                    sc = r[0] + random.gauss(0, noise)
-                    cands.append((sc, i, r[1], r[2], r[3], r[4]))
-                if not cands:
-                    stack.pop(); bt_count += 1; continue
-                cands.sort(key=lambda x: x[0], reverse=True)
-                sc, bi, np, nh, ns, m = cands[0]
-                tried.append(bi)
-                stack.append((np, nh, ns, step + 1, [], path + [bi]))
-            if local_best > best_steps:
-                best_steps = local_best
-                best_plan = local_plan
-    
-    logger.info(f"[PLAN] Best solution: {best_steps} steps ({_time.time()-t0:.1f}s)")
-    return best_plan
-
-
-# ---------------------------------------------------------------------------
 #  CamelBotAddon  — mitmproxy addon (interface unchanged)
 # ---------------------------------------------------------------------------
 
@@ -2408,9 +2299,6 @@ class CamelBotAddon:
         logger.info(f"[BOT] بدء المستوى {self._level} | RID={self.rid}")
         logger.info("=" * 50)
 
-        planned_moves = []
-        plan_idx = 0
-
         while self._bot_running:
             with self._lock:
                 gs_ready = self.gs is not None and self._flow is not None
@@ -2429,31 +2317,7 @@ class CamelBotAddon:
                 local_idx = self.gs.idx
 
             t0 = time.time()
-
-            if not planned_moves and self._step == 0:
-                logger.info("[BOT] Pre-planning solution with DFS...")
-                planned_moves = _plan_solution(pile, held, held_size, time_limit=12.0)
-                plan_idx = 0
-                logger.info(f"[BOT] Plan: {len(planned_moves)} moves")
-
-            block_idx = None
-            fail_reason = ""
-
-            if plan_idx < len(planned_moves):
-                candidate = planned_moves[plan_idx]
-                ix = _level_idx
-                avail_mask = _get_available(pile) if ix else 0
-                if ix and (avail_mask & ix.bit[candidate]):
-                    block_idx = candidate
-                    plan_idx += 1
-                else:
-                    logger.info(f"[BOT] Plan deviated at step {self._step}, falling back to beam search")
-                    planned_moves = []
-                    plan_idx = 0
-
-            if block_idx is None:
-                block_idx, fail_reason = _beam_search(pile, held, held_size)
-
+            block_idx, fail_reason = _beam_search(pile, held, held_size)
             dt = time.time() - t0
 
             if block_idx is None:
@@ -2493,10 +2357,9 @@ class CamelBotAddon:
                 self._queue.put_nowait((flow_ref, packet, step_n == 1, rid_snap))
 
             match_str = " -> ماتش!" if matched is not None else ""
-            src = "PLAN" if plan_idx > 0 and plan_idx <= len(planned_moves) else "BEAM"
             logger.info(
                 f"خطوة {step_n:3d}: نوع={block['type']:2d} | طبقة={block['layer']} | "
-                f"يد={hand_sz}/7 | باقي={pile_left} | {dt:.3f}s | {src}{match_str}"
+                f"يد={hand_sz}/7 | باقي={pile_left} | {dt:.3f}s{match_str}"
             )
 
             time.sleep(SEND_DELAY)
