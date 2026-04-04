@@ -2319,10 +2319,11 @@ class CamelBotAddon:
             if not bot_alive:
                 if self.rid is not None and self.rid == self._halted_rid:
                     logger.info(f"[BOT] موقوف على RID الحالي {self.rid} — لن يعاد تشغيله")
+                elif len(pile_blocks) < 20:
+                    logger.info(f"[SKIP] تجاهل مستوى تعليمي ({len(pile_blocks)} كتلة < 20)")
                 else:
                     self._level += 1
                     self._step = 0
-                    # ---- build spatial index for the new level ----
                     _set_level(pile_blocks)
                     self.gs = GameState(_level_idx, pile_blocks, hand_blocks or [], storage_blks or [])  # type: ignore[arg-type]
 
@@ -2334,13 +2335,17 @@ class CamelBotAddon:
                     )
                     start_bot = True
             else:
-                # reuse existing LevelIndex, just rebuild GameState with updated masks
-                if _level_idx is not None:
-                    self.gs = GameState(_level_idx, pile_blocks, hand_blocks or [], storage_blks or [])
-                logger.info(
-                    f"[UPDATE] كتل={_popcount(self.gs.pile_mask) if self.gs else '?'} "
-                    f"| يد={self.gs.hand_size() if self.gs else '?'}"
-                )
+                if self._bot_running:
+                    logger.info(
+                        f"[UPDATE] تجاهل (البوت شغال) | سيرفر: كتل={len(pile_blocks)} يد={len(hand_blocks)}"
+                    )
+                else:
+                    if _level_idx is not None:
+                        self.gs = GameState(_level_idx, pile_blocks, hand_blocks or [], storage_blks or [])
+                    logger.info(
+                        f"[UPDATE] كتل={_popcount(self.gs.pile_mask) if self.gs else '?'} "
+                        f"| يد={self.gs.hand_size() if self.gs else '?'}"
+                    )
 
         if start_bot:
             self._start_bot()
