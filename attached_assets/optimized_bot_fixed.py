@@ -2334,13 +2334,19 @@ class CamelBotAddon:
                     )
                     start_bot = True
             else:
-                # reuse existing LevelIndex, just rebuild GameState with updated masks
-                if _level_idx is not None:
-                    self.gs = GameState(_level_idx, pile_blocks, hand_blocks or [], storage_blks or [])
-                logger.info(
-                    f"[UPDATE] كتل={_popcount(self.gs.pile_mask) if self.gs else '?'} "
-                    f"| يد={self.gs.hand_size() if self.gs else '?'}"
-                )
+                if self._bot_running:
+                    server_pile = _popcount(self.gs.pile_mask) if self.gs else '?'
+                    server_hand = self.gs.hand_size() if self.gs else '?'
+                    logger.info(
+                        f"[UPDATE] تجاهل (البوت شغال) | سيرفر: كتل={len(pile_blocks)} يد={len(hand_blocks)}"
+                    )
+                else:
+                    if _level_idx is not None:
+                        self.gs = GameState(_level_idx, pile_blocks, hand_blocks or [], storage_blks or [])
+                    logger.info(
+                        f"[UPDATE] كتل={_popcount(self.gs.pile_mask) if self.gs else '?'} "
+                        f"| يد={self.gs.hand_size() if self.gs else '?'}"
+                    )
 
         if start_bot:
             self._start_bot()
