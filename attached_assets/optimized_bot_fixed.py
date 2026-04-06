@@ -34,80 +34,97 @@ import time
 from collections import defaultdict
 from typing import Optional
 
-import multiprocessing
-
-
-def _timer_process(cmd_queue):
-    import tkinter as tk
-
-    root = tk.Tk()
-    root.title("CamelBot Timer")
-    root.attributes("-topmost", True)
-    root.geometry("220x100+50+50")
-    root.configure(bg="#1a1a2e")
-    root.resizable(False, False)
-
-    rid_label = tk.Label(root, text="Waiting...", font=("Consolas", 10), fg="#e94560", bg="#1a1a2e")
-    rid_label.pack(pady=(8, 0))
-
-    timer_label = tk.Label(root, text="0s", font=("Consolas", 28, "bold"), fg="#0f3460", bg="#1a1a2e")
-    timer_label.pack(pady=(0, 8))
-
-    state = {"start_time": None, "running": False, "delay_id": None}
-
-    def begin_counting():
-        state["start_time"] = time.time()
-        state["running"] = True
-        state["delay_id"] = None
-
-    def update_display():
-        if state["running"] and state["start_time"]:
-            elapsed = int(time.time() - state["start_time"])
-            timer_label.config(text=f"{elapsed}s", fg="#00ff88")
-        root.after(200, update_display)
-
-    def check_commands():
-        try:
-            while not cmd_queue.empty():
-                cmd = cmd_queue.get_nowait()
-                if cmd[0] == "rid":
-                    rid = cmd[1]
-                    state["running"] = False
-                    state["start_time"] = None
-                    rid_label.config(text=f"RID: {rid}")
-                    timer_label.config(text="0s", fg="#0f3460")
-                    if state["delay_id"]:
-                        root.after_cancel(state["delay_id"])
-                    state["delay_id"] = root.after(3000, begin_counting)
-        except Exception:
-            pass
-        root.after(100, check_commands)
-
-    root.protocol("WM_DELETE_WINDOW", lambda: None)
-    update_display()
-    check_commands()
-    root.mainloop()
+import subprocess as _subprocess
+import sys
 
 
 class TimerPopup:
     def __init__(self):
-        self._process = None
-        self._queue = None
+        self._proc = None
+        self._script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_timer_gui.py")
 
     def start(self):
+        if not os.path.exists(self._script):
+            self._create_script()
         try:
-            self._queue = multiprocessing.Queue()
-            self._process = multiprocessing.Process(target=_timer_process, args=(self._queue,), daemon=True)
-            self._process.start()
+            self._proc = _subprocess.Popen(
+                [sys.executable, self._script],
+                stdin=_subprocess.PIPE,
+                creationflags=0x00000008 if sys.platform == "win32" else 0,
+            )
         except Exception:
-            self._queue = None
+            self._proc = None
 
     def on_new_rid(self, rid):
-        if self._queue:
+        if self._proc and self._proc.poll() is None:
             try:
-                self._queue.put_nowait(("rid", rid))
+                self._proc.stdin.write(f"rid:{rid}\n".encode())
+                self._proc.stdin.flush()
             except Exception:
                 pass
+
+    def _create_script(self):
+        code = '''import tkinter as tk
+import sys
+import time
+import threading
+import select
+
+root = tk.Tk()
+root.title("CamelBot Timer")
+root.attributes("-topmost", True)
+root.geometry("220x100+50+50")
+root.configure(bg="#1a1a2e")
+root.resizable(False, False)
+
+rid_label = tk.Label(root, text="Waiting...", font=("Consolas", 10), fg="#e94560", bg="#1a1a2e")
+rid_label.pack(pady=(8, 0))
+
+timer_label = tk.Label(root, text="0s", font=("Consolas", 28, "bold"), fg="#0f3460", bg="#1a1a2e")
+timer_label.pack(pady=(0, 8))
+
+state = {"start_time": None, "running": False, "delay_id": None}
+pending = []
+
+def begin_counting():
+    state["start_time"] = time.time()
+    state["running"] = True
+    state["delay_id"] = None
+
+def update_display():
+    if state["running"] and state["start_time"]:
+        elapsed = int(time.time() - state["start_time"])
+        timer_label.config(text=f"{elapsed}s", fg="#00ff88")
+    root.after(200, update_display)
+
+def read_stdin():
+    for line in sys.stdin:
+        line = line.strip()
+        if line.startswith("rid:"):
+            pending.append(line[4:])
+
+def check_pending():
+    while pending:
+        rid = pending.pop(0)
+        state["running"] = False
+        state["start_time"] = None
+        rid_label.config(text=f"RID: {rid}")
+        timer_label.config(text="0s", fg="#0f3460")
+        if state["delay_id"]:
+            root.after_cancel(state["delay_id"])
+        state["delay_id"] = root.after(3000, begin_counting)
+    root.after(100, check_pending)
+
+t = threading.Thread(target=read_stdin, daemon=True)
+t.start()
+
+root.protocol("WM_DELETE_WINDOW", lambda: None)
+update_display()
+check_pending()
+root.mainloop()
+'''
+        with open(self._script, "w", encoding="utf-8") as f:
+            f.write(code)
 
 
 _timer_popup = TimerPopup()
@@ -2418,37 +2435,51 @@ def _plan_score_move(pile, held, held_size, i, ix, variant=0, relaxed=False):
 _cached_pile_blocks = None
 
 
-def _c_engine_worker(pile_blocks, held, held_size, time_limit, result_queue):
-    try:
-        import camel_engine_wrapper as w
-        w.init_level(pile_blocks)
-        path, trials = w.plan(held, held_size, time_limit=time_limit)
-        result_queue.put(("ok", path, trials))
-    except Exception as e:
-        result_queue.put(("err", str(e), 0))
-
-
 def _run_c_engine_in_process(held, held_size, time_limit):
     global _cached_pile_blocks
     if _cached_pile_blocks is None:
         raise RuntimeError("No pile_blocks cached")
-    result_q = multiprocessing.Queue()
-    p = multiprocessing.Process(
-        target=_c_engine_worker,
-        args=(_cached_pile_blocks, dict(held), held_size, time_limit, result_q),
-        daemon=True,
+
+    _dir = os.path.dirname(os.path.abspath(__file__))
+    solver_script = os.path.join(_dir, "_c_solver.py")
+
+    if not os.path.exists(solver_script):
+        with open(solver_script, "w", encoding="utf-8") as f:
+            f.write('''import sys, json
+sys.path.insert(0, sys.argv[1])
+import camel_engine_wrapper as w
+data = json.loads(sys.stdin.read())
+w.init_level(data["pile_blocks"])
+held = {int(k): v for k, v in data["held"].items()}
+path, trials = w.plan(held, data["held_size"], time_limit=data["time_limit"])
+print(json.dumps({"path": path, "trials": trials}))
+''')
+
+    input_data = json.dumps({
+        "pile_blocks": _cached_pile_blocks,
+        "held": {str(k): v for k, v in held.items()},
+        "held_size": held_size,
+        "time_limit": time_limit,
+    })
+
+    kwargs = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = 0x00000008
+
+    proc = _subprocess.Popen(
+        [sys.executable, solver_script, _dir],
+        stdin=_subprocess.PIPE,
+        stdout=_subprocess.PIPE,
+        stderr=_subprocess.PIPE,
+        **kwargs,
     )
-    p.start()
-    p.join(timeout=time_limit + 10)
-    if p.is_alive():
-        p.terminate()
-        raise RuntimeError("C engine timed out")
-    if result_q.empty():
-        raise RuntimeError("C engine returned no result")
-    status, data, trials = result_q.get()
-    if status == "err":
-        raise RuntimeError(data)
-    return data, trials
+    stdout, stderr = proc.communicate(input=input_data.encode(), timeout=time_limit + 15)
+
+    if proc.returncode != 0:
+        raise RuntimeError(f"C solver failed: {stderr.decode()[:500]}")
+
+    result = json.loads(stdout.decode())
+    return result["path"], result["trials"]
 
 
 def _plan_solution(pile, held, held_size, time_limit=8.0):
