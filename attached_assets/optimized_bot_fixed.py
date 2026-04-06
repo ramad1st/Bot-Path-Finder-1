@@ -2578,6 +2578,7 @@ class CamelBotAddon:
         self._level = 0
         self._halted_rid: Optional[int] = None
         self._packet_id = 7
+        self._small_level_seen = False
 
     def running(self) -> None:
         self._loop = asyncio.get_event_loop()
@@ -2652,6 +2653,7 @@ class CamelBotAddon:
                 self.rid = incoming_rid
                 self._halted_rid = None
                 self._step = 0
+                self._small_level_seen = False
                 _clear_caches()
                 logger.info(f"[RID] جديد من السيرفر: {self.rid}")
 
@@ -2661,7 +2663,21 @@ class CamelBotAddon:
                 if self.rid is not None and self.rid == self._halted_rid:
                     logger.info(f"[BOT] موقوف على RID الحالي {self.rid} — لن يعاد تشغيله")
                 elif len(pile_blocks) < 20:
-                    logger.info(f"[SKIP] تجاهل مستوى تعليمي ({len(pile_blocks)} كتلة < 20)")
+                    if not self._small_level_seen:
+                        self._small_level_seen = True
+                        self._level += 1
+                        self._step = 0
+                        _set_level(pile_blocks)
+                        self.gs = GameState(_level_idx, pile_blocks, hand_blocks or [], storage_blks or [])
+                        layers = max((b["layer"] for b in pile_blocks), default=0)
+                        avail = _get_available(self.gs.pile_mask)
+                        logger.info(
+                            f"[LEVEL {self._level}] كتل={len(pile_blocks)} (صغير - أول مرة) | "
+                            f"طبقات={layers} | متاحة={_popcount(avail)} | RID={self.rid}"
+                        )
+                        start_bot = True
+                    else:
+                        logger.info(f"[SKIP] تجاهل تكرار مستوى صغير ({len(pile_blocks)} كتلة < 20)")
                 else:
                     self._level += 1
                     self._step = 0
