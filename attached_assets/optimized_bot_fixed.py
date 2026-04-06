@@ -2301,6 +2301,16 @@ def _plan_score_move(pile, held, held_size, i, ix, variant=0, relaxed=False):
     return s, new_pile, new_held, new_size, matched
 
 
+def _effective_steps(path, pile, held, held_size):
+    p, h, hs = pile, dict(held), held_size
+    last_ok = 0
+    for idx, bi in enumerate(path):
+        p, h, hs = _apply_pick_raw(p, dict(h), hs, bi)
+        if hs <= 4:
+            last_ok = idx + 1
+    return last_ok
+
+
 def _plan_solution(pile, held, held_size, time_limit=8.0):
     ix = _level_idx
     if ix is None:
@@ -2345,7 +2355,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
 
     for variant in range(4):
         for use_smart in [True, False]:
-            if _time.time() - t0 > time_limit * 0.4:
+            if _time.time() - t0 > time_limit * 0.3:
                 break
             initial_pile, initial_held, initial_hs, initial_path = _auto_match(
                 pile, dict(held), held_size, [], smart=use_smart)
@@ -2356,7 +2366,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                 best_plan = initial_path[:]
 
             for round_num in range(225):
-                if _time.time() - t0 > time_limit * 0.4:
+                if _time.time() - t0 > time_limit * 0.3:
                     break
                 if not beams:
                     break
@@ -2411,9 +2421,9 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
 
     noise_levels = [0, 200, 500, 1000, 2000, 3000, 5000]
     trial = 0
-    noisy_limit = time_limit * 0.7
+    noisy_limit = time_limit * 0.8
     for noise in noise_levels:
-        for seed in range(200):
+        for seed in range(500):
             if _time.time() - t0 > noisy_limit:
                 break
             trial += 1
@@ -2511,7 +2521,6 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                 last_ok = idx_bp + 1
         if last_ok < len(best_plan):
             best_plan = best_plan[:last_ok]
-            logger.info(f"[PLAN] Truncated to {last_ok} steps (hand<=4)")
 
     return best_plan
 
@@ -2734,7 +2743,7 @@ class CamelBotAddon:
 
             if not planned_moves and self._step == 0:
                 logger.info("[BOT] Pre-planning solution with DFS...")
-                planned_moves = _plan_solution(pile, held, held_size, time_limit=60.0)
+                planned_moves = _plan_solution(pile, held, held_size, time_limit=30.0)
                 plan_idx = 0
                 logger.info(f"[BOT] Plan: {len(planned_moves)} moves")
 
@@ -2776,6 +2785,15 @@ class CamelBotAddon:
                 block = local_idx.blocks[block_idx]
                 if not (self.gs.pile_mask & local_idx.bit[block_idx]):
                     continue
+
+                cur_hand = self.gs.hand_size()
+                hc = self.gs.held_counts()
+                held_for_type = hc.get(block["type"], 0)
+                will_match = (held_for_type >= 2)
+                if cur_hand >= 4 and not will_match:
+                    self._halted_rid = self.rid
+                    self._bot_running = False
+                    break
 
                 ok, matched = self.gs.apply_touch(block["id"])
                 if not ok:
