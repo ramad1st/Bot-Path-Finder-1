@@ -392,6 +392,8 @@ def _set_level(pile_blocks: list[dict]) -> None:
         if i is not None:
             pile |= _level_idx.bit[i]
     _board_difficulty = _compute_board_difficulty(pile)
+    global _cached_pile_blocks
+    _cached_pile_blocks = pile_blocks
     try:
         _cew.init_level(pile_blocks)
         _c_engine_ready = True
@@ -2413,6 +2415,42 @@ def _plan_score_move(pile, held, held_size, i, ix, variant=0, relaxed=False):
     return s, new_pile, new_held, new_size, matched
 
 
+_cached_pile_blocks = None
+
+
+def _c_engine_worker(pile_blocks, held, held_size, time_limit, result_queue):
+    try:
+        import camel_engine_wrapper as w
+        w.init_level(pile_blocks)
+        path, trials = w.plan(held, held_size, time_limit=time_limit)
+        result_queue.put(("ok", path, trials))
+    except Exception as e:
+        result_queue.put(("err", str(e), 0))
+
+
+def _run_c_engine_in_process(held, held_size, time_limit):
+    global _cached_pile_blocks
+    if _cached_pile_blocks is None:
+        raise RuntimeError("No pile_blocks cached")
+    result_q = multiprocessing.Queue()
+    p = multiprocessing.Process(
+        target=_c_engine_worker,
+        args=(_cached_pile_blocks, dict(held), held_size, time_limit, result_q),
+        daemon=True,
+    )
+    p.start()
+    p.join(timeout=time_limit + 10)
+    if p.is_alive():
+        p.terminate()
+        raise RuntimeError("C engine timed out")
+    if result_q.empty():
+        raise RuntimeError("C engine returned no result")
+    status, data, trials = result_q.get()
+    if status == "err":
+        raise RuntimeError(data)
+    return data, trials
+
+
 def _plan_solution(pile, held, held_size, time_limit=8.0):
     ix = _level_idx
     if ix is None:
@@ -2423,7 +2461,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
     if _c_engine_ready:
         try:
             t0 = _time.time()
-            c_path, c_trials = _cew.plan(held, held_size, time_limit=time_limit)
+            c_path, c_trials = _run_c_engine_in_process(held, held_size, time_limit)
             elapsed = _time.time() - t0
             logger.info(f"[C-ENGINE] Best: {len(c_path)} steps in {elapsed:.1f}s ({c_trials} trials)")
             print(f">>> C ENGINE PLAN: {len(c_path)} steps in {elapsed:.1f}s <<<")
