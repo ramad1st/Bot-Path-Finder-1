@@ -69,7 +69,6 @@ class TimerPopup:
 import sys
 import time
 import threading
-import select
 
 root = tk.Tk()
 root.title("CamelBot Timer")
@@ -99,10 +98,14 @@ def update_display():
     root.after(200, update_display)
 
 def read_stdin():
-    for line in sys.stdin:
-        line = line.strip()
-        if line.startswith("rid:"):
-            pending.append(line[4:])
+    try:
+        for line in sys.stdin:
+            line = line.strip()
+            if line.startswith("rid:"):
+                pending.append(line[4:])
+    except:
+        pass
+    root.after(0, root.destroy)
 
 def check_pending():
     while pending:
@@ -119,7 +122,7 @@ def check_pending():
 t = threading.Thread(target=read_stdin, daemon=True)
 t.start()
 
-root.protocol("WM_DELETE_WINDOW", lambda: None)
+root.protocol("WM_DELETE_WINDOW", root.destroy)
 update_display()
 check_pending()
 root.mainloop()
