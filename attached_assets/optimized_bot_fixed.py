@@ -37,6 +37,20 @@ from typing import Optional
 from mitmproxy import http
 from mitmproxy import ctx
 
+try:
+    from . import camel_engine_wrapper as _cew
+except ImportError:
+    try:
+        import camel_engine_wrapper as _cew
+    except ImportError:
+        import importlib.util as _ilu
+        _cew_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "camel_engine_wrapper.py")
+        _cew_spec = _ilu.spec_from_file_location("camel_engine_wrapper", _cew_path)
+        _cew = _ilu.module_from_spec(_cew_spec)
+        _cew_spec.loader.exec_module(_cew)
+
+_c_engine_ready = False
+
 SECRET       = "11f7257bf19219a61dd1db032b9a7038"
 UID          = 398487653
 SEND_DELAY   = 0
@@ -285,7 +299,7 @@ def _compute_board_difficulty(pile: int) -> int:
 
 
 def _set_level(pile_blocks: list[dict]) -> None:
-    global _level_idx, _board_difficulty
+    global _level_idx, _board_difficulty, _c_engine_ready
     _level_idx = LevelIndex(pile_blocks)
     _clear_caches()
     pile = 0
@@ -294,6 +308,13 @@ def _set_level(pile_blocks: list[dict]) -> None:
         if i is not None:
             pile |= _level_idx.bit[i]
     _board_difficulty = _compute_board_difficulty(pile)
+    try:
+        _cew.init_level(pile_blocks)
+        _c_engine_ready = True
+        logger.info("[C-ENGINE] Level initialized in C engine")
+    except Exception as e:
+        _c_engine_ready = False
+        logger.warning(f"[C-ENGINE] Failed to init: {e}, falling back to Python")
 
 
 # ---- cached wrappers -------------------------------------------------------
@@ -2312,6 +2333,18 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
         return []
 
     import time as _time
+
+    if _c_engine_ready:
+        try:
+            t0 = _time.time()
+            c_path, c_trials = _cew.plan(held, held_size, time_limit=time_limit)
+            elapsed = _time.time() - t0
+            logger.info(f"[C-ENGINE] Best: {len(c_path)} steps in {elapsed:.1f}s ({c_trials} trials)")
+            if c_path:
+                return c_path
+        except Exception as e:
+            logger.warning(f"[C-ENGINE] Error: {e}, falling back to Python")
+
     t0 = _time.time()
 
     best_plan = []
