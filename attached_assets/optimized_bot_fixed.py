@@ -2782,12 +2782,7 @@ class CamelBotAddon:
             if self._queue is not None:
                 self._queue.put_nowait((flow_ref, packet, step_n == 1, rid_snap))
 
-            match_str = " -> ماتش!" if matched is not None else ""
-            src = "PLAN" if plan_idx > 0 and plan_idx <= len(planned_moves) else "BEAM"
-            logger.info(
-                f"خطوة {step_n:3d}: نوع={block['type']:2d} | طبقة={block['layer']} | "
-                f"يد={hand_sz}/7 | باقي={pile_left} | {dt:.3f}s | {src}{match_str}"
-            )
+            pass
 
             time.sleep(SEND_DELAY)
 
@@ -2798,15 +2793,9 @@ class CamelBotAddon:
 
         self._bot_running = False
 
-        logger.info("=" * 50)
-        if self.gs and self.gs.is_won():
-            logger.info(f"فزنا! في {self._step} خطوة")
-        elif self.gs and self.gs.is_dead():
-            logger.warning("خسرنا! المستودع امتلأ")
-        else:
-            if self.gs:
-                logger.info(f"توقف في خطوة {self._step} | متبقي: {_popcount(self.gs.pile_mask)} كتلة")
-        logger.info("=" * 50)
+        if self.gs:
+            hand_sz = self.gs.hand_size()
+            logger.info(f"blocks_played={self._step}, blocks_in_hand={hand_sz}")
 
     def _build_packet(self, block: dict) -> str:
         return json.dumps(
