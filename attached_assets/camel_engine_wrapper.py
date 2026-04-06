@@ -4,46 +4,73 @@ import json
 import time
 import sys
 import subprocess
+import shutil
 
 _dir = os.path.dirname(os.path.abspath(__file__))
+_lib = None
+_available = False
 
-if sys.platform == "win32":
-    _lib_name = "camel_engine.dll"
-else:
-    _lib_name = "camel_engine.so"
 
-_lib_path = os.path.join(_dir, _lib_name)
-
-if not os.path.exists(_lib_path):
-    print(f"Compiling {_lib_name}...")
-    _src = os.path.join(_dir, "camel_engine.c")
+def _try_compile():
     if sys.platform == "win32":
-        subprocess.check_call(["gcc", "-O3", "-shared", "-o", _lib_path, _src, "-lm"])
+        lib_name = "camel_engine.dll"
     else:
-        subprocess.check_call(["gcc", "-O3", "-march=native", "-shared", "-fPIC", "-o", _lib_path, _src, "-lm"])
-    print("Done!")
+        lib_name = "camel_engine.so"
+    lib_path = os.path.join(_dir, lib_name)
+    src_path = os.path.join(_dir, "camel_engine.c")
 
-_lib = ctypes.CDLL(_lib_path)
+    if os.path.exists(lib_path):
+        return lib_path
 
-u64 = ctypes.c_uint64
-_lib.level_init.argtypes = [
-    ctypes.c_int,
-    ctypes.POINTER(ctypes.c_int),
-    ctypes.POINTER(ctypes.c_int),
-    ctypes.POINTER(u64),
-    ctypes.POINTER(u64),
-    ctypes.c_int,
-]
-_lib.level_init.restype = None
+    if not os.path.exists(src_path):
+        return None
 
-_lib.plan_solution.argtypes = [
-    ctypes.POINTER(ctypes.c_int),
-    ctypes.c_int,
-    ctypes.c_double,
-    ctypes.POINTER(ctypes.c_int),
-    ctypes.POINTER(ctypes.c_int),
-]
-_lib.plan_solution.restype = ctypes.c_int
+    gcc = shutil.which("gcc")
+    if gcc is None:
+        return None
+
+    try:
+        print(f"Compiling {lib_name}...")
+        if sys.platform == "win32":
+            subprocess.check_call([gcc, "-O3", "-shared", "-o", lib_path, src_path, "-lm"])
+        else:
+            subprocess.check_call([gcc, "-O3", "-march=native", "-shared", "-fPIC", "-o", lib_path, src_path, "-lm"])
+        print("Done!")
+        return lib_path
+    except Exception as e:
+        print(f"Compilation failed: {e}")
+        return None
+
+
+_lib_path = _try_compile()
+if _lib_path:
+    try:
+        _lib = ctypes.CDLL(_lib_path)
+
+        u64 = ctypes.c_uint64
+        _lib.level_init.argtypes = [
+            ctypes.c_int,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(u64),
+            ctypes.POINTER(u64),
+            ctypes.c_int,
+        ]
+        _lib.level_init.restype = None
+
+        _lib.plan_solution.argtypes = [
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.c_int,
+            ctypes.c_double,
+            ctypes.POINTER(ctypes.c_int),
+            ctypes.POINTER(ctypes.c_int),
+        ]
+        _lib.plan_solution.restype = ctypes.c_int
+
+        _available = True
+    except Exception as e:
+        print(f"Failed to load C engine: {e}")
+        _lib = None
 
 MAX_TYPES = 20
 MAX_PATH = 230
@@ -61,6 +88,9 @@ def _pyint_to_u64x4(val):
 
 
 def init_level(pile_blocks):
+    if not _available:
+        raise RuntimeError("C engine not available")
+
     blocks = sorted(pile_blocks, key=lambda b: b["id"])
     n = len(blocks)
 
@@ -85,6 +115,7 @@ def init_level(pile_blocks):
                     cb[j] |= 1 << i
                     cv[i] |= 1 << j
 
+    u64 = ctypes.c_uint64
     cb_raw = (u64 * (n * MW))()
     cv_raw = (u64 * (n * MW))()
     for i in range(n):
@@ -100,6 +131,9 @@ def init_level(pile_blocks):
 
 
 def plan(held_dict, held_size, time_limit=15.0):
+    if not _available:
+        raise RuntimeError("C engine not available")
+
     init_held = (ctypes.c_int * (MAX_TYPES+1))()
     for t, c in held_dict.items():
         if 0 <= t <= MAX_TYPES:
@@ -118,6 +152,10 @@ def plan(held_dict, held_size, time_limit=15.0):
 
 
 if __name__ == "__main__":
+    if not _available:
+        print("C engine not available! Need gcc to compile.")
+        sys.exit(1)
+
     for level_num in range(1, 7):
         suffix = "" if level_num == 1 else f"_{level_num}"
         fname = os.path.join(_dir, f"level_data{suffix}.json")
