@@ -2311,12 +2311,120 @@ def _effective_steps(path, pile, held, held_size):
     return last_ok
 
 
+def _auto_match_static(p, h, hs, path, smart=True):
+    ix = _level_idx
+    changed = True
+    while changed:
+        changed = False
+        avail = _get_available(p)
+        if not avail:
+            break
+        if smart:
+            matches = []
+            for i in ix.iter_bits(avail):
+                if h.get(ix.btype[i], 0) >= 2:
+                    unlocks = _get_unlocks(p, i)
+                    matches.append((unlocks, i))
+            if matches:
+                matches.sort(reverse=True)
+                best_i = matches[0][1]
+                p, h, hs = _apply_pick_raw(p, dict(h), hs, best_i)
+                path.append(best_i)
+                changed = True
+        else:
+            for i in ix.iter_bits(avail):
+                if h.get(ix.btype[i], 0) >= 2:
+                    p, h, hs = _apply_pick_raw(p, dict(h), hs, i)
+                    path.append(i)
+                    changed = True
+                    break
+    return p, h, hs, path
+
+
+def _noisy_worker(args):
+    global _score_cache
+    pile, held, held_size, worker_noise_levels, seed_start, seed_end, time_limit, relaxed, use_softmax = args
+    ix = _level_idx
+    if ix is None:
+        return (0, [], 0)
+
+    import time as _time
+    import math as _math
+    t0 = _time.time()
+    best_eff = 0
+    best_plan = []
+    _score_cache = {}
+    trials = 0
+
+    for noise in worker_noise_levels:
+        for seed in range(seed_start, seed_end):
+            if _time.time() - t0 > time_limit:
+                return (best_eff, best_plan, trials)
+            trials += 1
+
+            use_smart = seed % 2 == 0
+            variant = seed % 6
+            random.seed(seed * 100 + noise)
+            _score_cache.clear()
+
+            p, h, hs = pile, dict(held), held_size
+            path = []
+
+            while len(path) < 225:
+                p, h, hs, path = _auto_match_static(p, dict(h), hs, path, smart=use_smart)
+                avail = _get_available(p)
+                if not avail:
+                    break
+                cands = []
+                for i in ix.iter_bits(avail):
+                    r = _plan_score_move(p, h, hs, i, ix, variant=variant, relaxed=relaxed)
+                    if r[0] is None:
+                        continue
+                    sc = r[0]
+                    if noise > 0:
+                        sc += random.gauss(0, noise)
+                    cands.append((sc, i, r[1], r[2], r[3]))
+                if not cands:
+                    break
+                cands.sort(key=lambda x: x[0], reverse=True)
+
+                if use_softmax and len(cands) > 1:
+                    temp = max(500.0, 8000.0 * (1.0 - len(path) / 200.0))
+                    weights = []
+                    for sc_w, i_w, np2, nh2, ns2 in cands:
+                        w = _math.exp((sc_w - cands[0][0]) / temp)
+                        weights.append(w)
+                    total_w = sum(weights)
+                    rv = random.random() * total_w
+                    cumul = 0
+                    pick_idx = 0
+                    for idx_w, w in enumerate(weights):
+                        cumul += w
+                        if cumul >= rv:
+                            pick_idx = idx_w
+                            break
+                    sc, bi, np, nh, ns = cands[pick_idx]
+                else:
+                    sc, bi, np, nh, ns = cands[0]
+                p, h, hs = np, nh, ns
+                path.append(bi)
+
+            eff = _effective_steps(path, pile, held, held_size)
+            if eff > best_eff:
+                best_eff = eff
+                best_plan = path[:]
+
+    return (best_eff, best_plan, trials)
+
+
 def _plan_solution(pile, held, held_size, time_limit=8.0):
     ix = _level_idx
     if ix is None:
         return []
 
     import time as _time
+    from multiprocessing import Pool
+    import os
     t0 = _time.time()
 
     best_plan = []
@@ -2325,48 +2433,21 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
     beam_w = 60
     branch_factor = 10
 
-    def _auto_match(p, h, hs, path, smart=True):
-        changed = True
-        while changed:
-            changed = False
-            avail = _get_available(p)
-            if not avail:
-                break
-            if smart:
-                matches = []
-                for i in ix.iter_bits(avail):
-                    if h.get(ix.btype[i], 0) >= 2:
-                        unlocks = _get_unlocks(p, i)
-                        matches.append((unlocks, i))
-                if matches:
-                    matches.sort(reverse=True)
-                    best_i = matches[0][1]
-                    p, h, hs = _apply_pick_raw(p, dict(h), hs, best_i)
-                    path.append(best_i)
-                    changed = True
-            else:
-                for i in ix.iter_bits(avail):
-                    if h.get(ix.btype[i], 0) >= 2:
-                        p, h, hs = _apply_pick_raw(p, dict(h), hs, i)
-                        path.append(i)
-                        changed = True
-                        break
-        return p, h, hs, path
-
     for variant in range(4):
         for use_smart in [True, False]:
-            if _time.time() - t0 > time_limit * 0.3:
+            if _time.time() - t0 > time_limit * 0.4:
                 break
-            initial_pile, initial_held, initial_hs, initial_path = _auto_match(
+            initial_pile, initial_held, initial_hs, initial_path = _auto_match_static(
                 pile, dict(held), held_size, [], smart=use_smart)
 
             beams = [(0.0, initial_pile, initial_held, initial_hs, initial_path)]
-            if len(initial_path) > best_steps:
-                best_steps = len(initial_path)
+            eff = _effective_steps(initial_path, pile, held, held_size)
+            if eff > best_steps:
+                best_steps = eff
                 best_plan = initial_path[:]
 
             for round_num in range(225):
-                if _time.time() - t0 > time_limit * 0.3:
+                if _time.time() - t0 > time_limit * 0.4:
                     break
                 if not beams:
                     break
@@ -2375,8 +2456,9 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                 for beam_score, p, h, hs, path in beams:
                     avail = _get_available(p)
                     if not avail:
-                        if len(path) > best_steps:
-                            best_steps = len(path)
+                        eff = _effective_steps(path, pile, held, held_size)
+                        if eff > best_steps:
+                            best_steps = eff
                             best_plan = path[:]
                         continue
 
@@ -2387,20 +2469,22 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                             continue
                         cands.append((r[0], i, r[1], r[2], r[3]))
                     if not cands:
-                        if len(path) > best_steps:
-                            best_steps = len(path)
+                        eff = _effective_steps(path, pile, held, held_size)
+                        if eff > best_steps:
+                            best_steps = eff
                             best_plan = path[:]
                         continue
 
                     cands.sort(key=lambda x: x[0], reverse=True)
                     for sc, bi, np, nh, ns in cands[:branch_factor]:
                         new_path = path + [bi]
-                        np2, nh2, ns2, new_path2 = _auto_match(np, dict(nh), ns, new_path, smart=use_smart)
+                        np2, nh2, ns2, new_path2 = _auto_match_static(np, dict(nh), ns, new_path, smart=use_smart)
                         state_score = beam_score + sc + len(new_path2) * 500
                         next_beams.append((state_score, np2, nh2, ns2, new_path2))
 
-                        if len(new_path2) > best_steps:
-                            best_steps = len(new_path2)
+                        eff = _effective_steps(new_path2, pile, held, held_size)
+                        if eff > best_steps:
+                            best_steps = eff
                             best_plan = new_path2[:]
 
                 if not next_beams:
@@ -2421,9 +2505,9 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
 
     noise_levels = [0, 200, 500, 1000, 2000, 3000, 5000]
     trial = 0
-    noisy_limit = time_limit * 0.8
+    noisy_limit = time_limit * 0.7
     for noise in noise_levels:
-        for seed in range(500):
+        for seed in range(200):
             if _time.time() - t0 > noisy_limit:
                 break
             trial += 1
@@ -2437,7 +2521,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
             path = []
 
             while len(path) < 225:
-                p, h, hs, path = _auto_match(p, dict(h), hs, path, smart=use_smart)
+                p, h, hs, path = _auto_match_static(p, dict(h), hs, path, smart=use_smart)
                 avail = _get_available(p)
                 if not avail:
                     break
@@ -2457,60 +2541,64 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                 p, h, hs = np, nh, ns
                 path.append(bi)
 
-            if len(path) > best_steps:
-                best_steps = len(path)
+            eff = _effective_steps(path, pile, held, held_size)
+            if eff > best_steps:
+                best_steps = eff
                 best_plan = path[:]
 
     if best_steps < 150:
-        import math as _math
-        for retry_seed in range(10000):
-            if _time.time() - t0 > time_limit:
-                break
-            random.seed(retry_seed * 54321 + 99)
-            _score_cache.clear()
-            use_smart = retry_seed % 3 != 2
-            variant = retry_seed % 6
+        import multiprocessing as _mp
+        import os as _os
+        retry_time = time_limit - (_time.time() - t0)
+        if retry_time > 3.0:
+            n_retry_workers = min(6, _os.cpu_count() or 4)
+            retry_chunks = [
+                (pile, held, held_size, [0, 200, 500, 1000, 2000, 3000, 5000], 0, 500, retry_time * 0.9, True, True),
+                (pile, held, held_size, [0, 300, 800, 1500, 3000, 6000, 10000], 0, 500, retry_time * 0.9, True, True),
+                (pile, held, held_size, [0, 100, 400, 900, 2000, 5000, 8000], 0, 500, retry_time * 0.9, False, True),
+                (pile, held, held_size, [0, 500, 1500, 4000, 7000, 12000], 0, 500, retry_time * 0.9, False, False),
+                (pile, held, held_size, [0, 150, 600, 1200, 2500, 5000, 9000], 0, 500, retry_time * 0.9, True, False),
+                (pile, held, held_size, [0, 250, 700, 1800, 3500, 6000, 11000], 0, 500, retry_time * 0.9, False, True),
+            ]
+            pipes = []
+            r_procs = []
+            for chunk in retry_chunks[:n_retry_workers]:
+                parent_conn, child_conn = _mp.Pipe()
+                def _rtarget(conn, args):
+                    try:
+                        result = _noisy_worker(args)
+                        conn.send(result)
+                    except Exception:
+                        conn.send((0, [], 0))
+                    finally:
+                        conn.close()
+                rp = _mp.Process(target=_rtarget, args=(child_conn, chunk))
+                rp.start()
+                child_conn.close()
+                pipes.append(parent_conn)
+                r_procs.append(rp)
 
-            p, h, hs = pile, dict(held), held_size
-            path = []
+            for conn, rp in zip(pipes, r_procs):
+                try:
+                    if conn.poll(timeout=retry_time + 2):
+                        result = conn.recv()
+                        steps, plan, trials = result
+                        trial += trials
+                        eff = _effective_steps(plan, pile, held, held_size) if plan else 0
+                        if eff > best_steps:
+                            best_steps = eff
+                            best_plan = plan[:]
+                except Exception:
+                    pass
+                finally:
+                    conn.close()
+            for rp in r_procs:
+                rp.join(timeout=2)
+                if rp.is_alive():
+                    rp.terminate()
+                    rp.join(timeout=1)
 
-            while len(path) < 225:
-                p, h, hs, path = _auto_match(p, dict(h), hs, path, smart=use_smart)
-                avail = _get_available(p)
-                if not avail:
-                    break
-                cands = []
-                for i in ix.iter_bits(avail):
-                    r = _plan_score_move(p, h, hs, i, ix, variant=variant, relaxed=True)
-                    if r[0] is None:
-                        continue
-                    cands.append((r[0], i, r[1], r[2], r[3]))
-                if not cands:
-                    break
-                cands.sort(key=lambda x: x[0], reverse=True)
-                temp = max(500.0, 8000.0 * (1.0 - len(path) / 200.0))
-                weights = []
-                for sc, i, np2, nh2, ns2 in cands:
-                    w = _math.exp((sc - cands[0][0]) / temp)
-                    weights.append(w)
-                total_w = sum(weights)
-                r = random.random() * total_w
-                cumul = 0
-                pick_idx = 0
-                for idx_w, w in enumerate(weights):
-                    cumul += w
-                    if cumul >= r:
-                        pick_idx = idx_w
-                        break
-                sc, bi, np, nh, ns = cands[pick_idx]
-                p, h, hs = np, nh, ns
-                path.append(bi)
-
-            if len(path) > best_steps:
-                best_steps = len(path)
-                best_plan = path[:]
-
-    logger.info(f"[PLAN] Best: {best_steps} steps in {_time.time()-t0:.1f}s ({trial} noisy trials)")
+    logger.info(f"[PLAN] Best effective: {best_steps} steps in {_time.time()-t0:.1f}s ({trial} noisy trials)")
 
     if best_plan:
         sim_p, sim_h, sim_hs = pile, dict(held), held_size
@@ -2743,7 +2831,7 @@ class CamelBotAddon:
 
             if not planned_moves and self._step == 0:
                 logger.info("[BOT] Pre-planning solution with DFS...")
-                planned_moves = _plan_solution(pile, held, held_size, time_limit=30.0)
+                planned_moves = _plan_solution(pile, held, held_size, time_limit=45.0)
                 plan_idx = 0
                 logger.info(f"[BOT] Plan: {len(planned_moves)} moves")
 
