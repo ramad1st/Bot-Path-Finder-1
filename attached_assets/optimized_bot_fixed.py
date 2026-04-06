@@ -2501,6 +2501,18 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                 best_plan = path[:]
 
     logger.info(f"[PLAN] Best: {best_steps} steps in {_time.time()-t0:.1f}s ({trial} noisy trials)")
+
+    if best_plan:
+        sim_p, sim_h, sim_hs = pile, dict(held), held_size
+        last_ok = 0
+        for idx_bp, bi in enumerate(best_plan):
+            sim_p, sim_h, sim_hs = _apply_pick_raw(sim_p, dict(sim_h), sim_hs, bi)
+            if sim_hs <= 4:
+                last_ok = idx_bp + 1
+        if last_ok < len(best_plan):
+            best_plan = best_plan[:last_ok]
+            logger.info(f"[PLAN] Truncated to {last_ok} steps (hand<=4)")
+
     return best_plan
 
 
