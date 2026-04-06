@@ -2794,11 +2794,38 @@ class CamelBotAddon:
 
             if not planned_moves and self._step == 0:
                 n_tiles = _popcount(pile)
-                plan_time = 2.0 if n_tiles < 20 else 15.0
-                logger.info(f"[BOT] Pre-planning solution... ({n_tiles} tiles, {plan_time}s)")
-                planned_moves = _plan_solution(pile, held, held_size, time_limit=plan_time)
-                plan_idx = 0
-                logger.info(f"[BOT] Plan: {len(planned_moves)} moves")
+                if n_tiles < 20:
+                    logger.info(f"[BOT] مستوى صغير ({n_tiles} كتلة) — إرسال دفعة واحدة")
+                    ix_local = _level_idx
+                    if ix_local:
+                        all_blocks = list(ix_local.iter_bits(pile))
+                        for bi in all_blocks:
+                            with self._lock:
+                                if self.gs is None or self._flow is None:
+                                    break
+                                block = ix_local.blocks[bi]
+                                if not (self.gs.pile_mask & ix_local.bit[bi]):
+                                    continue
+                                ok, matched = self.gs.apply_touch(block["id"])
+                                if not ok:
+                                    continue
+                                self._step += 1
+                                packet = self._build_packet(block).encode("utf-8")
+                                self._packet_id += 2
+                                flow_ref = self._flow
+                                rid_snap = self.rid
+                            if self._queue is not None:
+                                self._queue.put_nowait((flow_ref, packet, self._step == 1, rid_snap))
+                            time.sleep(SEND_DELAY)
+                        if self.gs:
+                            logger.info(f"blocks_played={self._step}, blocks_in_hand={self.gs.hand_size()}")
+                        self._bot_running = False
+                        break
+                else:
+                    logger.info(f"[BOT] Pre-planning solution... ({n_tiles} tiles, 15s)")
+                    planned_moves = _plan_solution(pile, held, held_size, time_limit=15.0)
+                    plan_idx = 0
+                    logger.info(f"[BOT] Plan: {len(planned_moves)} moves")
 
             block_idx = None
             fail_reason = ""
