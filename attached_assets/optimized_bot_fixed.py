@@ -148,7 +148,7 @@ _c_engine_ready = False
 
 SECRET       = "11f7257bf19219a61dd1db032b9a7038"
 UID          = 398487653
-SEND_DELAY   = 0.15
+SEND_DELAY   = 0.03
 BEAM_WIDTH   = 16
 SEARCH_DEPTH = 10
 _scoring_noise = 0.0
@@ -2445,7 +2445,10 @@ def _run_c_engine_in_process(held, held_size, time_limit):
 
     if not os.path.exists(solver_script):
         with open(solver_script, "w", encoding="utf-8") as f:
-            f.write('''import sys, json
+            f.write('''import sys, json, os
+if sys.platform == "win32":
+    import ctypes
+    ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
 sys.path.insert(0, sys.argv[1])
 import camel_engine_wrapper as w
 data = json.loads(sys.stdin.read())
@@ -2971,7 +2974,7 @@ class CamelBotAddon:
 
             if not planned_moves and self._step == 0:
                 logger.info("[BOT] Pre-planning solution...")
-                planned_moves = _plan_solution(pile, held, held_size, time_limit=15.0)
+                planned_moves = _plan_solution(pile, held, held_size, time_limit=8.0)
                 plan_idx = 0
                 logger.info(f"[BOT] Plan: {len(planned_moves)} moves")
 
