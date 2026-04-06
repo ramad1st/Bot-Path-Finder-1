@@ -34,6 +34,91 @@ import time
 from collections import defaultdict
 from typing import Optional
 
+try:
+    import tkinter as tk
+    _HAS_TK = True
+except ImportError:
+    _HAS_TK = False
+
+
+class TimerPopup:
+    def __init__(self):
+        self._thread = None
+        self._root = None
+        self._label = None
+        self._start_time = None
+        self._running = False
+        self._delay_timer = None
+        self._rid_text = ""
+
+    def _run_gui(self):
+        self._root = tk.Tk()
+        self._root.title("CamelBot Timer")
+        self._root.attributes("-topmost", True)
+        self._root.geometry("220x100+50+50")
+        self._root.configure(bg="#1a1a2e")
+        self._root.resizable(False, False)
+
+        self._rid_label = tk.Label(
+            self._root, text="Waiting...", font=("Consolas", 10),
+            fg="#e94560", bg="#1a1a2e"
+        )
+        self._rid_label.pack(pady=(8, 0))
+
+        self._label = tk.Label(
+            self._root, text="0s", font=("Consolas", 28, "bold"),
+            fg="#0f3460", bg="#1a1a2e"
+        )
+        self._label.pack(pady=(0, 8))
+
+        self._update_display()
+        self._root.protocol("WM_DELETE_WINDOW", lambda: None)
+        self._root.mainloop()
+
+    def _update_display(self):
+        if self._root is None:
+            return
+        if self._running and self._start_time is not None:
+            elapsed = int(time.time() - self._start_time)
+            self._label.config(text=f"{elapsed}s", fg="#00ff88")
+        try:
+            self._root.after(200, self._update_display)
+        except Exception:
+            pass
+
+    def start(self):
+        if not _HAS_TK:
+            return
+        if self._thread is None or not self._thread.is_alive():
+            self._thread = threading.Thread(target=self._run_gui, daemon=True)
+            self._thread.start()
+
+    def on_new_rid(self, rid):
+        self._running = False
+        self._start_time = None
+        self._rid_text = f"RID: {rid}"
+
+        if self._root and self._label:
+            try:
+                self._root.after(0, lambda: self._rid_label.config(text=self._rid_text))
+                self._root.after(0, lambda: self._label.config(text="0s", fg="#0f3460"))
+            except Exception:
+                pass
+
+        if self._delay_timer is not None:
+            self._delay_timer.cancel()
+
+        self._delay_timer = threading.Timer(3.0, self._begin_counting)
+        self._delay_timer.daemon = True
+        self._delay_timer.start()
+
+    def _begin_counting(self):
+        self._start_time = time.time()
+        self._running = True
+
+
+_timer_popup = TimerPopup()
+
 from mitmproxy import http
 from mitmproxy import ctx
 
@@ -2628,6 +2713,7 @@ class CamelBotAddon:
         asyncio.ensure_future(self._sender_coro(), loop=self._loop)
         _clear_caches()
         logger.info("[ADDON] جاهز")
+        _timer_popup.start()
 
     def websocket_start(self, flow: http.HTTPFlow) -> None:
         with self._lock:
@@ -2670,6 +2756,7 @@ class CamelBotAddon:
                             self._step = 0
                             _clear_caches()
                             logger.info(f"[RID] جديد: {rid}")
+                            _timer_popup.on_new_rid(rid)
             return
 
         data = obj.get("data") or obj.get("message")
@@ -2697,6 +2784,7 @@ class CamelBotAddon:
                 self._step = 0
                 _clear_caches()
                 logger.info(f"[RID] جديد من السيرفر: {self.rid}")
+                _timer_popup.on_new_rid(self.rid)
 
             bot_alive = self._bot_thread is not None and self._bot_thread.is_alive()
 
