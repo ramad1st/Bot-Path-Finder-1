@@ -60,10 +60,17 @@ _scoring_noise = 0.0
 _fast_mode = False
 _tabu_set: set[tuple[int, int]] = set()
 
+_log_dir = os.path.dirname(os.path.abspath(__file__))
+_log_file = os.path.join(_log_dir, "camelbot.log")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
     datefmt="%H:%M:%S",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(_log_file, encoding="utf-8"),
+    ],
 )
 logger = logging.getLogger("CamelBot")
 
