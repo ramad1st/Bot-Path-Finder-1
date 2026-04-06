@@ -2857,35 +2857,28 @@ class CamelBotAddon:
                 continue
 
             flow, packet_bytes, is_first, rid = item
-            frame = build_ws_frame(packet_bytes, masked=True)
             sent = False
 
             try:
-                transport = getattr(flow.server_conn, "transport", None)
-                if transport:
-                    transport.write(frame)
-                    sent = True
+                ctx.master.commands.call("inject.websocket", flow, True, packet_bytes, False)
+                sent = True
             except Exception as e:
-                logger.debug(f"[SENDER] م1: {e}")
+                logger.debug(f"[SENDER] inject failed: {e}")
 
             if not sent:
+                frame = build_ws_frame(packet_bytes, masked=True)
                 try:
-                    transport = getattr(flow.client_conn, "transport", None)
+                    transport = getattr(flow.server_conn, "transport", None)
                     if transport:
                         transport.write(frame)
                         sent = True
                 except Exception as e:
-                    logger.debug(f"[SENDER] م2: {e}")
-
-            if not sent:
-                try:
-                    ctx.master.commands.call("inject.websocket", flow, False, packet_bytes, False)
-                    sent = True
-                except Exception as e:
-                    logger.debug(f"[SENDER] م3: {e}")
+                    logger.debug(f"[SENDER] transport failed: {e}")
 
             if not sent:
                 logger.error("[SENDER] ✗ فشلت جميع المحاولات")
+
+            await asyncio.sleep(0.02)
 
     def _play_loop(self) -> None:
         for _ in range(60):
