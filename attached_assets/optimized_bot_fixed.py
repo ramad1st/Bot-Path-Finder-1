@@ -2793,8 +2793,10 @@ class CamelBotAddon:
             t0 = time.time()
 
             if not planned_moves and self._step == 0:
-                logger.info("[BOT] Pre-planning solution...")
-                planned_moves = _plan_solution(pile, held, held_size, time_limit=15.0)
+                n_tiles = _popcount(pile)
+                plan_time = 2.0 if n_tiles < 20 else 15.0
+                logger.info(f"[BOT] Pre-planning solution... ({n_tiles} tiles, {plan_time}s)")
+                planned_moves = _plan_solution(pile, held, held_size, time_limit=plan_time)
                 plan_idx = 0
                 logger.info(f"[BOT] Plan: {len(planned_moves)} moves")
 
