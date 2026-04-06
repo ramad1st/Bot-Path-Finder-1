@@ -2,9 +2,28 @@ import ctypes
 import os
 import json
 import time
+import sys
+import subprocess
 
 _dir = os.path.dirname(os.path.abspath(__file__))
-_lib = ctypes.CDLL(os.path.join(_dir, "camel_engine.so"))
+
+if sys.platform == "win32":
+    _lib_name = "camel_engine.dll"
+else:
+    _lib_name = "camel_engine.so"
+
+_lib_path = os.path.join(_dir, _lib_name)
+
+if not os.path.exists(_lib_path):
+    print(f"Compiling {_lib_name}...")
+    _src = os.path.join(_dir, "camel_engine.c")
+    if sys.platform == "win32":
+        subprocess.check_call(["gcc", "-O3", "-shared", "-o", _lib_path, _src, "-lm"])
+    else:
+        subprocess.check_call(["gcc", "-O3", "-march=native", "-shared", "-fPIC", "-o", _lib_path, _src, "-lm"])
+    print("Done!")
+
+_lib = ctypes.CDLL(_lib_path)
 
 u64 = ctypes.c_uint64
 _lib.level_init.argtypes = [

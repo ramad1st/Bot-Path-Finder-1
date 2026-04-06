@@ -4,6 +4,23 @@
 #include <math.h>
 #include <time.h>
 
+#ifdef _WIN32
+#include <windows.h>
+static double _win_freq = 0;
+static void _init_timer(void) {
+    LARGE_INTEGER f; QueryPerformanceFrequency(&f); _win_freq = (double)f.QuadPart;
+}
+static double _get_time_s(void) {
+    LARGE_INTEGER c; QueryPerformanceCounter(&c); return (double)c.QuadPart / _win_freq;
+}
+#else
+static void _init_timer(void) {}
+static double _get_time_s(void) {
+    struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts);
+    return ts.tv_sec + ts.tv_nsec * 1e-9;
+}
+#endif
+
 #define MAX_BLOCKS 256
 #define MW 4
 #define MAX_TYPES 20
@@ -259,9 +276,8 @@ static BeamState beams_b[BEAM_W * BRANCH + 10];
 typedef struct { double sc; int idx; Mask np; Hand nh; int nsz; } Cand;
 static Cand cand_buf[MAX_BLOCKS];
 
-static inline double elapsed_s(const struct timespec *t0) {
-    struct timespec now; clock_gettime(CLOCK_MONOTONIC,&now);
-    return (now.tv_sec-t0->tv_sec)+(now.tv_nsec-t0->tv_nsec)*1e-9;
+static inline double elapsed_since(double t0) {
+    return _get_time_s() - t0;
 }
 
 static int cand_cmp(const void *a, const void *b) {
@@ -275,7 +291,8 @@ static int beam_cmp(const void *a, const void *b) {
 
 int plan_solution(int *init_held, int init_held_size, double time_limit,
                   int *out_path, int *out_len) {
-    struct timespec t0; clock_gettime(CLOCK_MONOTONIC,&t0);
+    _init_timer();
+    double t0_time = _get_time_s();
 
     Mask pile=mzero();
     for (int i=0;i<G.n;i++) mset(&pile,i);
@@ -286,8 +303,8 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
     int best[MAX_PATH], blen=0, trials=0;
     double beam_end=time_limit*0.50, noisy_end=time_limit*0.90, bt_end=time_limit*0.95;
 
-    for (int var=0; var<12 && elapsed_s(&t0)<beam_end; var++) {
-        for (int us=0; us<2 && elapsed_s(&t0)<beam_end; us++) {
+    for (int var=0; var<12 && elapsed_since(t0_time)<beam_end; var++) {
+        for (int us=0; us<2 && elapsed_since(t0_time)<beam_end; us++) {
             Mask ip=pile; Hand ih=hand;
             int ipath[MAX_PATH]; int ipl=0;
             auto_match(&ip,&ih,ipath,&ipl,us);
@@ -301,7 +318,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
             beams_a[0].plen=ipl;
             int n_beams=1;
 
-            for (int round=0; round<225 && n_beams>0 && elapsed_s(&t0)<beam_end; round++) {
+            for (int round=0; round<225 && n_beams>0 && elapsed_since(t0_time)<beam_end; round++) {
                 int n_next=0;
 
                 for (int bi=0; bi<n_beams; bi++) {
@@ -376,7 +393,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
 
     int noise_levels[]={0,50,100,150,200,300,500,800,1000,1500,2000,3000,5000,8000,12000};
     int n_noise=15;
-    for (int seed=0; elapsed_s(&t0)<noisy_end; seed++) {
+    for (int seed=0; elapsed_since(t0_time)<noisy_end; seed++) {
         trials++;
         int ni=seed%n_noise;
         int noise=noise_levels[ni];
@@ -412,7 +429,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
     }
 
     if (blen>0 && blen<150) {
-        for (int bt=0; elapsed_s(&t0)<bt_end; bt++) {
+        for (int bt=0; elapsed_since(t0_time)<bt_end; bt++) {
             xs_seed((unsigned)(bt*31337+7));
             int bp2=blen-40; if(bp2<0)bp2=0;
             int rng=blen-5-bp2; if(rng<=0)rng=1;
@@ -452,7 +469,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
     }
 
     if (blen<150) {
-        for (int rs=0; elapsed_s(&t0)<time_limit; rs++) {
+        for (int rs=0; elapsed_since(t0_time)<time_limit; rs++) {
             xs_seed((unsigned)(rs*54321+99));
             int path[MAX_PATH];
             Mask p=pile; Hand h=hand; int plen=0;
