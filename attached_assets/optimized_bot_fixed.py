@@ -312,9 +312,11 @@ def _set_level(pile_blocks: list[dict]) -> None:
         _cew.init_level(pile_blocks)
         _c_engine_ready = True
         logger.info("[C-ENGINE] Level initialized in C engine")
+        print(">>> C ENGINE LOADED SUCCESSFULLY <<<")
     except Exception as e:
         _c_engine_ready = False
         logger.warning(f"[C-ENGINE] Failed to init: {e}, falling back to Python")
+        print(">>> C ENGINE FAILED - using Python <<<")
 
 
 # ---- cached wrappers -------------------------------------------------------
@@ -2340,10 +2342,12 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
             c_path, c_trials = _cew.plan(held, held_size, time_limit=time_limit)
             elapsed = _time.time() - t0
             logger.info(f"[C-ENGINE] Best: {len(c_path)} steps in {elapsed:.1f}s ({c_trials} trials)")
+            print(f">>> C ENGINE PLAN: {len(c_path)} steps in {elapsed:.1f}s <<<")
             if c_path:
                 return c_path
         except Exception as e:
             logger.warning(f"[C-ENGINE] Error: {e}, falling back to Python")
+            print(f">>> C ENGINE ERROR: {e} <<<")
 
     t0 = _time.time()
 
