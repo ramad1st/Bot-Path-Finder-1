@@ -63,16 +63,15 @@ _tabu_set: set[tuple[int, int]] = set()
 _log_dir = os.path.dirname(os.path.abspath(__file__))
 _log_file = os.path.join(_log_dir, "camelbot.log")
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)s | %(message)s",
-    datefmt="%H:%M:%S",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(_log_file, encoding="utf-8"),
-    ],
-)
 logger = logging.getLogger("CamelBot")
+logger.setLevel(logging.INFO)
+_fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S")
+_sh = logging.StreamHandler()
+_sh.setFormatter(_fmt)
+logger.addHandler(_sh)
+_fh = logging.FileHandler(_log_file, encoding="utf-8")
+_fh.setFormatter(_fmt)
+logger.addHandler(_fh)
 
 _STOP = object()
 
