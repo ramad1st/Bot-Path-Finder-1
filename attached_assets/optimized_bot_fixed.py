@@ -2771,6 +2771,8 @@ class CamelBotAddon:
         self._level = 0
         self._halted_rid: Optional[int] = None
         self._packet_id = 7
+        self._keepalive_thread: Optional[threading.Thread] = None
+        self._keepalive_running = False
 
     def running(self) -> None:
         self._loop = asyncio.get_event_loop()
@@ -2784,13 +2786,15 @@ class CamelBotAddon:
         with self._lock:
             logger.info("[WS] اتصال جديد — reset")
             self._bot_running = False
+            self._stop_keepalive()
             self.gs = None
             self.rid = None
             self._halted_rid = None
-            self._flow = None
+            self._flow = flow
             self._level = 0
             self._step = 0
             _clear_caches()
+            self._start_keepalive()
             if self._queue:
                 flushed = flush_queue(self._queue)
                 if flushed:
@@ -3072,12 +3076,44 @@ class CamelBotAddon:
             }
         )
 
+    def _keepalive_loop(self) -> None:
+        while self._keepalive_running:
+            time.sleep(3)
+            with self._lock:
+                flow = self._flow
+                rid = self.rid
+            if flow is None or rid is None:
+                continue
+            try:
+                hb = json.dumps({
+                    "packet_id": 0,
+                    "command": "CMD_HEART_BEAT",
+                    "param": {"rid": rid, "uid": UID, "secret": SECRET}
+                }).encode("utf-8")
+                frame = build_ws_frame(hb, masked=True)
+                transport = getattr(flow.server_conn, "transport", None)
+                if transport:
+                    transport.write(frame)
+            except Exception:
+                pass
+
+    def _start_keepalive(self) -> None:
+        if self._keepalive_thread and self._keepalive_thread.is_alive():
+            return
+        self._keepalive_running = True
+        self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
+        self._keepalive_thread.start()
+
+    def _stop_keepalive(self) -> None:
+        self._keepalive_running = False
+
     def websocket_end(self, flow: http.HTTPFlow) -> None:
         with self._lock:
             if flow is self._flow:
                 logger.info("[WS] انغلقت الجلسة")
                 self._bot_running = False
                 self._flow = None
+                self._stop_keepalive()
 
 
 addons = [CamelBotAddon()]
