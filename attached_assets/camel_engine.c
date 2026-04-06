@@ -25,9 +25,9 @@ static double _get_time_s(void) {
 #define MW 4
 #define MAX_TYPES 20
 #define CMAX_PATH 230
-#define NUM_VARIANTS 20
-#define BEAM_W 150
-#define BRANCH 20
+#define NUM_VARIANTS 30
+#define BEAM_W 250
+#define BRANCH 30
 
 typedef unsigned long long u64;
 typedef struct { u64 w[MW]; } Mask;
@@ -68,10 +68,10 @@ typedef struct {
 
 static Level G;
 
-static int unlock_w[NUM_VARIANTS]={600,800,400,1000,200,900,1200,300,700,500,150,1500,2000,0,0,0,1500,100,50,1800};
-static int avail_w_t[NUM_VARIANTS]={400,600,300,200,100,500,800,150,700,350,50,250,0,2000,0,0,1500,100,1200,200};
-static int depth_w[NUM_VARIANTS]={200,100,300,400,50,350,500,250,150,600,25,100,0,0,2000,0,0,1000,800,50};
-static int hand_w[NUM_VARIANTS]={400,300,500,600,800,250,200,700,350,150,900,450,0,0,0,2000,100,1000,100,1200};
+static int unlock_w[NUM_VARIANTS]={600,800,400,1000,200,900,1200,300,700,500,150,1500,2000,0,0,0,1500,100,50,1800, 550,750,950,1100,350,650,1300,450,850,1600};
+static int avail_w_t[NUM_VARIANTS]={400,600,300,200,100,500,800,150,700,350,50,250,0,2000,0,0,1500,100,1200,200, 450,550,350,250,150,650,900,500,750,1000};
+static int depth_w[NUM_VARIANTS]={200,100,300,400,50,350,500,250,150,600,25,100,0,0,2000,0,0,1000,800,50, 175,225,275,450,75,325,550,125,375,700};
+static int hand_w[NUM_VARIANTS]={400,300,500,600,800,250,200,700,350,150,900,450,0,0,0,2000,100,1000,100,1200, 350,450,550,650,750,200,300,800,500,1100};
 
 void level_init(int n, int *btypes, int *layers, u64 *cb_raw, u64 *cv_raw, int n_types) {
     G.n=n; G.n_types=n_types;
