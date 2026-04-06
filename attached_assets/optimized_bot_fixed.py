@@ -2350,7 +2350,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
 
     for variant in range(6):
         for use_smart in [True, False]:
-            if _time.time() - t0 > time_limit * 0.5:
+            if _time.time() - t0 > time_limit * 0.50:
                 break
             initial_pile, initial_held, initial_hs, initial_path = _auto_match(
                 pile, dict(held), held_size, [], smart=use_smart)
@@ -2361,7 +2361,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                 best_plan = initial_path[:]
 
             for round_num in range(225):
-                if _time.time() - t0 > time_limit * 0.5:
+                if _time.time() - t0 > time_limit * 0.50:
                     break
                 if not beams:
                     break
@@ -2416,7 +2416,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
 
     noise_levels = [0, 100, 200, 500, 1000, 2000, 3000, 5000, 8000, 12000]
     trial = 0
-    noisy_limit = time_limit * 0.75
+    noisy_limit = time_limit * 0.80
     for noise in noise_levels:
         for seed in range(300):
             if _time.time() - t0 > noisy_limit:
@@ -2425,6 +2425,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
 
             use_smart = seed % 2 == 0
             variant = seed % 20
+            use_relaxed = seed % 4 != 0
             random.seed(seed * 100 + noise)
             _score_cache.clear()
 
@@ -2438,7 +2439,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                     break
                 cands = []
                 for i in ix.iter_bits(avail):
-                    r = _plan_score_move(p, h, hs, i, ix, variant=variant)
+                    r = _plan_score_move(p, h, hs, i, ix, variant=variant, relaxed=use_relaxed)
                     if r[0] is None:
                         continue
                     sc = r[0]
@@ -2457,7 +2458,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                 best_plan = path[:]
 
     if best_steps < 150 and best_plan:
-        bt_limit = time_limit * 0.85
+        bt_limit = time_limit * 0.88
         for bt_seed in range(50000):
             if _time.time() - t0 > bt_limit:
                 break
@@ -2554,7 +2555,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                 best_steps = len(path)
                 best_plan = path[:]
 
-    logger.info(f"[PLAN] Best: {best_steps} steps in {_time.time()-t0:.1f}s ({trial} noisy trials)")
+    logger.info(f"[PLAN] Best: {best_steps} steps in {_time.time()-t0:.1f}s")
 
     return best_plan
 
@@ -2777,7 +2778,7 @@ class CamelBotAddon:
 
             if not planned_moves and self._step == 0:
                 logger.info("[BOT] Pre-planning solution...")
-                planned_moves = _plan_solution(pile, held, held_size, time_limit=30.0)
+                planned_moves = _plan_solution(pile, held, held_size, time_limit=15.0)
                 plan_idx = 0
                 logger.info(f"[BOT] Plan: {len(planned_moves)} moves")
 
