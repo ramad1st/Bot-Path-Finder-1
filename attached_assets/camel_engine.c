@@ -24,7 +24,7 @@ static double _get_time_s(void) {
 #define MAX_BLOCKS 256
 #define MW 4
 #define MAX_TYPES 20
-#define MAX_PATH 230
+#define CMAX_PATH 230
 #define NUM_VARIANTS 20
 #define BEAM_W 150
 #define BRANCH 20
@@ -181,14 +181,14 @@ static void auto_match(Mask *pile, Hand *h, int *path, int *plen, int smart) {
                     bits&=bits-1;
                 }
             }
-            if (best_i>=0) { apply_pick(pile,h,best_i); if(*plen<MAX_PATH)path[(*plen)++]=best_i; changed=1; }
+            if (best_i>=0) { apply_pick(pile,h,best_i); if(*plen<CMAX_PATH)path[(*plen)++]=best_i; changed=1; }
         } else {
             for (int ww=0;ww<MW;ww++) {
                 u64 bits=avail.w[ww];
                 while (bits) {
                     int i=ww*64+__builtin_ctzll(bits);
                     if (h->c[G.btype[i]]>=2) {
-                        apply_pick(pile,h,i); if(*plen<MAX_PATH)path[(*plen)++]=i; changed=1; goto next_am;
+                        apply_pick(pile,h,i); if(*plen<CMAX_PATH)path[(*plen)++]=i; changed=1; goto next_am;
                     }
                     bits&=bits-1;
                 }
@@ -266,7 +266,7 @@ typedef struct {
     double score;
     Mask pile;
     Hand hand;
-    int path[MAX_PATH];
+    int path[CMAX_PATH];
     int plen;
 } BeamState;
 
@@ -300,13 +300,13 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
     for (int t=0;t<=MAX_TYPES;t++) hand.c[t]=init_held[t];
     hand.sz=init_held_size;
 
-    int best[MAX_PATH], blen=0, trials=0;
+    int best[CMAX_PATH], blen=0, trials=0;
     double beam_end=time_limit*0.50, noisy_end=time_limit*0.90, bt_end=time_limit*0.95;
 
     for (int var=0; var<12 && elapsed_since(t0_time)<beam_end; var++) {
         for (int us=0; us<2 && elapsed_since(t0_time)<beam_end; us++) {
             Mask ip=pile; Hand ih=hand;
-            int ipath[MAX_PATH]; int ipl=0;
+            int ipath[CMAX_PATH]; int ipl=0;
             auto_match(&ip,&ih,ipath,&ipl,us);
 
             if (ipl>blen) { blen=ipl; memcpy(best,ipath,ipl*sizeof(int)); }
@@ -359,7 +359,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                         int oldpl=bs->plen;
                         memcpy(ns->path, bs->path, oldpl*sizeof(int));
                         ns->plen=oldpl;
-                        if (ns->plen<MAX_PATH) ns->path[ns->plen++]=cand_buf[ci].idx;
+                        if (ns->plen<CMAX_PATH) ns->path[ns->plen++]=cand_buf[ci].idx;
 
                         auto_match(&ns->pile,&ns->hand,ns->path,&ns->plen,us);
                         ns->score=bs->score+cand_buf[ci].sc+ns->plen*500;
@@ -402,9 +402,9 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
         int use_smart=rs%2==0, variant=rs%20, use_relaxed=rs%4!=0;
 
         Mask p=pile; Hand h=hand;
-        int path[MAX_PATH]; int plen=0;
+        int path[CMAX_PATH]; int plen=0;
 
-        while (plen<MAX_PATH) {
+        while (plen<CMAX_PATH) {
             auto_match(&p,&h,path,&plen,use_smart);
             Mask avail; get_available(&p,&avail);
             if (mis_zero(&avail)) break;
@@ -423,7 +423,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
             }
             if (bi2<0) break;
             p=bp; h=bh;
-            if (plen<MAX_PATH) path[plen++]=bi2;
+            if (plen<CMAX_PATH) path[plen++]=bi2;
         }
         if (plen>blen) { blen=plen; memcpy(best,path,plen*sizeof(int)); }
     }
@@ -442,9 +442,9 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
             }
             if (!ok) continue;
 
-            int path[MAX_PATH]; memcpy(path,best,bpt*sizeof(int));
+            int path[CMAX_PATH]; memcpy(path,best,bpt*sizeof(int));
             int pl=bpt;
-            while (pl<MAX_PATH) {
+            while (pl<CMAX_PATH) {
                 auto_match(&p,&h,path,&pl,bt%2==0);
                 Mask av; get_available(&p,&av);
                 if (mis_zero(&av)) break;
@@ -462,7 +462,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                     }
                 }
                 if (ti<0) break;
-                p=tp; h=th; if(pl<MAX_PATH) path[pl++]=ti;
+                p=tp; h=th; if(pl<CMAX_PATH) path[pl++]=ti;
             }
             if (pl>blen) { blen=pl; memcpy(best,path,pl*sizeof(int)); }
         }
@@ -471,11 +471,11 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
     if (blen<150) {
         for (int rs=0; elapsed_since(t0_time)<time_limit; rs++) {
             xs_seed((unsigned)(rs*54321+99));
-            int path[MAX_PATH];
+            int path[CMAX_PATH];
             Mask p=pile; Hand h=hand; int plen=0;
             int use_smart=rs%3!=2, variant=rs%20, use_relaxed=rs%4!=0;
             int noise=1000+rs*100;
-            while (plen<MAX_PATH) {
+            while (plen<CMAX_PATH) {
                 auto_match(&p,&h,path,&plen,use_smart);
                 Mask avail; get_available(&p,&avail);
                 if (mis_zero(&avail)) break;
@@ -494,7 +494,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                 }
                 if (bi2<0) break;
                 p=bp; h=bh;
-                if (plen<MAX_PATH) path[plen++]=bi2;
+                if (plen<CMAX_PATH) path[plen++]=bi2;
             }
             if (plen>blen) { blen=plen; memcpy(best,path,plen*sizeof(int)); }
         }
