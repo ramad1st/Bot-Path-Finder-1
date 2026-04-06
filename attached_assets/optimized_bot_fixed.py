@@ -53,7 +53,7 @@ _c_engine_ready = False
 
 SECRET       = "11f7257bf19219a61dd1db032b9a7038"
 UID          = 398487653
-SEND_DELAY   = 0
+SEND_DELAY   = 0.15
 BEAM_WIDTH   = 16
 SEARCH_DEPTH = 10
 _scoring_noise = 0.0
@@ -2889,8 +2889,7 @@ class CamelBotAddon:
 
             if self._queue is not None:
                 self._queue.put_nowait((flow_ref, packet, step_n == 1, rid_snap))
-
-            pass
+                logger.info(f"[MOVE] #{step_n} tile={block['id']} type={block['type']} hand={hand_sz} pile={pile_left}")
 
             time.sleep(SEND_DELAY)
 
