@@ -2597,6 +2597,7 @@ class CamelBotAddon:
             self._flow = None
             self._level = 0
             self._step = 0
+            self._small_level_seen = False
             _clear_caches()
             if self._queue:
                 flushed = flush_queue(self._queue)
