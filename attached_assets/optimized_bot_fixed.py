@@ -38,6 +38,7 @@ import subprocess as _subprocess
 import sys
 
 
+
 class TimerPopup:
     def __init__(self):
         self._proc = None
@@ -148,7 +149,7 @@ _c_engine_ready = False
 
 SECRET       = "11f7257bf19219a61dd1db032b9a7038"
 UID          = 398487653
-SEND_DELAY   = 0.03
+SEND_DELAY   = 0
 BEAM_WIDTH   = 16
 SEARCH_DEPTH = 10
 _scoring_noise = 0.0
@@ -2435,56 +2436,6 @@ def _plan_score_move(pile, held, held_size, i, ix, variant=0, relaxed=False):
 _cached_pile_blocks = None
 
 
-def _run_c_engine_in_process(held, held_size, time_limit):
-    global _cached_pile_blocks
-    if _cached_pile_blocks is None:
-        raise RuntimeError("No pile_blocks cached")
-
-    _dir = os.path.dirname(os.path.abspath(__file__))
-    solver_script = os.path.join(_dir, "_c_solver.py")
-
-    if not os.path.exists(solver_script):
-        with open(solver_script, "w", encoding="utf-8") as f:
-            f.write('''import sys, json, os
-if sys.platform == "win32":
-    import ctypes
-    ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x00004000)
-sys.path.insert(0, sys.argv[1])
-import camel_engine_wrapper as w
-data = json.loads(sys.stdin.read())
-w.init_level(data["pile_blocks"])
-held = {int(k): v for k, v in data["held"].items()}
-path, trials = w.plan(held, data["held_size"], time_limit=data["time_limit"])
-print(json.dumps({"path": path, "trials": trials}))
-''')
-
-    input_data = json.dumps({
-        "pile_blocks": _cached_pile_blocks,
-        "held": {str(k): v for k, v in held.items()},
-        "held_size": held_size,
-        "time_limit": time_limit,
-    })
-
-    kwargs = {}
-    if sys.platform == "win32":
-        kwargs["creationflags"] = 0x00000008
-
-    proc = _subprocess.Popen(
-        [sys.executable, solver_script, _dir],
-        stdin=_subprocess.PIPE,
-        stdout=_subprocess.PIPE,
-        stderr=_subprocess.PIPE,
-        **kwargs,
-    )
-    stdout, stderr = proc.communicate(input=input_data.encode(), timeout=time_limit + 15)
-
-    if proc.returncode != 0:
-        raise RuntimeError(f"C solver failed: {stderr.decode()[:500]}")
-
-    result = json.loads(stdout.decode())
-    return result["path"], result["trials"]
-
-
 def _plan_solution(pile, held, held_size, time_limit=8.0):
     ix = _level_idx
     if ix is None:
@@ -2495,7 +2446,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
     if _c_engine_ready:
         try:
             t0 = _time.time()
-            c_path, c_trials = _run_c_engine_in_process(held, held_size, time_limit)
+            c_path, c_trials = _cew.plan(held, held_size, time_limit=time_limit)
             elapsed = _time.time() - t0
             logger.info(f"[C-ENGINE] Best: {len(c_path)} steps in {elapsed:.1f}s ({c_trials} trials)")
             print(f">>> C ENGINE PLAN: {len(c_path)} steps in {elapsed:.1f}s <<<")
@@ -2771,8 +2722,6 @@ class CamelBotAddon:
         self._level = 0
         self._halted_rid: Optional[int] = None
         self._packet_id = 7
-        self._keepalive_thread: Optional[threading.Thread] = None
-        self._keepalive_running = False
 
     def running(self) -> None:
         self._loop = asyncio.get_event_loop()
@@ -2786,15 +2735,13 @@ class CamelBotAddon:
         with self._lock:
             logger.info("[WS] اتصال جديد — reset")
             self._bot_running = False
-            self._stop_keepalive()
             self.gs = None
             self.rid = None
             self._halted_rid = None
-            self._flow = flow
+            self._flow = None
             self._level = 0
             self._step = 0
             _clear_caches()
-            self._start_keepalive()
             if self._queue:
                 flushed = flush_queue(self._queue)
                 if flushed:
@@ -3076,44 +3023,12 @@ class CamelBotAddon:
             }
         )
 
-    def _keepalive_loop(self) -> None:
-        while self._keepalive_running:
-            time.sleep(3)
-            with self._lock:
-                flow = self._flow
-                rid = self.rid
-            if flow is None or rid is None:
-                continue
-            try:
-                hb = json.dumps({
-                    "packet_id": 0,
-                    "command": "CMD_HEART_BEAT",
-                    "param": {"rid": rid, "uid": UID, "secret": SECRET}
-                }).encode("utf-8")
-                frame = build_ws_frame(hb, masked=True)
-                transport = getattr(flow.server_conn, "transport", None)
-                if transport:
-                    transport.write(frame)
-            except Exception:
-                pass
-
-    def _start_keepalive(self) -> None:
-        if self._keepalive_thread and self._keepalive_thread.is_alive():
-            return
-        self._keepalive_running = True
-        self._keepalive_thread = threading.Thread(target=self._keepalive_loop, daemon=True)
-        self._keepalive_thread.start()
-
-    def _stop_keepalive(self) -> None:
-        self._keepalive_running = False
-
     def websocket_end(self, flow: http.HTTPFlow) -> None:
         with self._lock:
             if flow is self._flow:
                 logger.info("[WS] انغلقت الجلسة")
                 self._bot_running = False
                 self._flow = None
-                self._stop_keepalive()
 
 
 addons = [CamelBotAddon()]
