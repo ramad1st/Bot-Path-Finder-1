@@ -155,6 +155,7 @@ UID          = 398487653
 SEND_DELAY   = 0
 BEAM_WIDTH   = 16
 SEARCH_DEPTH = 10
+MAX_PLAY_STEPS = 200
 _scoring_noise = 0.0
 _fast_mode = False
 _tabu_set: set[tuple[int, int]] = set()
@@ -2918,6 +2919,9 @@ class CamelBotAddon:
                 if self.gs is None or self._flow is None:
                     continue
                 if self.gs.is_won() or self.gs.is_dead():
+                    break
+                if self._step >= MAX_PLAY_STEPS:
+                    logger.info(f"[BOT] وصل الحد الأقصى {MAX_PLAY_STEPS} خطوة — توقف")
                     break
                 pile = self.gs.pile_mask
                 held = self.gs.held_counts()

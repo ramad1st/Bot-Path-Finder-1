@@ -34,7 +34,7 @@ def _try_compile():
         if sys.platform == "win32":
             subprocess.check_call([gcc, "-O3", "-shared", "-o", lib_path, src_path, "-lm"])
         else:
-            subprocess.check_call([gcc, "-O3", "-march=native", "-shared", "-fPIC", "-o", lib_path, src_path, "-lm"])
+            subprocess.check_call([gcc, "-O3", "-march=native", "-shared", "-fPIC", "-o", lib_path, src_path, "-lm", "-lpthread"])
         print("Done!")
         return lib_path
     except Exception as e:
