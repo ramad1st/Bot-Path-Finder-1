@@ -29,6 +29,7 @@ static double _get_time_s(void) {
 #define MW 4
 #define MAX_TYPES 20
 #define CMAX_PATH 230
+#define MAX_PLAY 200
 #define NUM_VARIANTS 50
 #define BEAM_W 250
 #define BRANCH 30
@@ -404,7 +405,7 @@ static void *noisy_search_thread(void *arg) {
         pthread_mutex_lock(ta->mutex);
         int cur_best = *ta->shared_best_len;
         pthread_mutex_unlock(ta->mutex);
-        if (cur_best >= 225) break;
+        if (cur_best >= MAX_PLAY) break;
     }
     return NULL;
 }
@@ -443,7 +444,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
             auto_match(&ip,&ih,ipath,&ipl,us);
 
             if (ipl>blen) { blen=ipl; memcpy(best,ipath,ipl*sizeof(int)); }
-            if (blen>=225) goto done;
+            if (blen>=MAX_PLAY) goto done;
 
             beams_a[0].score=0;
             beams_a[0].pile=ip;
@@ -504,7 +505,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                 }
 
                 if (!n_next) break;
-                if (blen>=225) goto done;
+                if (blen>=MAX_PLAY) goto done;
 
                 qsort(beams_b,n_next,sizeof(BeamState),beam_cmp);
 
@@ -523,11 +524,11 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                     }
                 }
             }
-            if (blen>=225) goto done;
+            if (blen>=MAX_PLAY) goto done;
         }
     }
 
-    if (blen>=225) goto done;
+    if (blen>=MAX_PLAY) goto done;
 
 #ifndef _WIN32
     {
@@ -574,14 +575,14 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
             int use_smart=rs%2==0, variant=rs%NUM_VARIANTS, use_relaxed=rs%4!=0;
             int plen = noisy_greedy(pile, hand, noise, variant, use_smart, use_relaxed, &rng, path);
             if (plen>blen) { blen=plen; memcpy(best,path,plen*sizeof(int)); }
-            if (blen>=225) goto done;
+            if (blen>=MAX_PLAY) goto done;
         }
     }
 #endif
 
-    if (blen>=225) goto done;
+    if (blen>=MAX_PLAY) goto done;
 
-    if (blen>0 && blen<225) {
+    if (blen>0 && blen<MAX_PLAY) {
         XorShift rng;
         for (int bt=0; elapsed_since(t0_time)<bt_end; bt++) {
             xsr_seed(&rng,(unsigned)(bt*31337+7));
@@ -624,7 +625,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                 p=tp; h=th; if(pl<CMAX_PATH) path[pl++]=ti;
             }
             if (pl>blen) { blen=pl; memcpy(best,path,pl*sizeof(int)); }
-            if (blen>=225) goto done;
+            if (blen>=MAX_PLAY) goto done;
         }
     }
 
@@ -638,11 +639,12 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
             int plen = noisy_greedy(pile, hand, noise, variant,
                                     use_smart, use_relaxed, &rng, path);
             if (plen>blen) { blen=plen; memcpy(best,path,plen*sizeof(int)); }
-            if (blen>=225) goto done;
+            if (blen>=MAX_PLAY) goto done;
         }
     }
 
 done:
+    if (blen > MAX_PLAY) blen = MAX_PLAY;
     *out_len=blen;
     memcpy(out_path,best,blen*sizeof(int));
     free(beams_a); free(beams_b); free(cand_buf);
