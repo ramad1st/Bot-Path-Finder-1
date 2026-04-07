@@ -1,0 +1,82 @@
+12:49:35 | INFO | [ADDON] جاهز
+12:49:35 | INFO | [SENDER] بدأ
+12:49:45 | INFO | [WS] اتصال جديد — reset
+12:49:45 | INFO | [RID] جديد: 3918726
+12:49:45 | INFO | [SKIP] تجاهل مستوى تعليمي (18 كتلة < 20)
+12:49:45 | INFO | [SKIP] تجاهل مستوى تعليمي (18 كتلة < 20)
+12:49:45 | INFO | [SKIP] تجاهل مستوى تعليمي (18 كتلة < 20)
+12:49:53 | INFO | [C-ENGINE] Level initialized in C engine
+12:49:53 | INFO | >>> C ENGINE LOADED SUCCESSFULLY <<<
+12:49:53 | INFO | [LEVEL 1] كتل=198 | طبقات=15 | متاحة=26 | RID=3918726
+12:49:53 | INFO | ==================================================
+12:49:53 | INFO | [BOT] بدء المستوى 1 | RID=3918726
+12:49:53 | INFO | ==================================================
+12:49:53 | INFO | [BOT] Pre-planning solution...
+12:50:01 | INFO | [C-ENGINE] Best: 171 steps in 8.0s (1565 trials)
+12:50:01 | INFO | >>> C ENGINE PLAN: 171 steps in 8.0s <<<
+12:50:01 | INFO | [C-ENGINE] Truncated 171 -> 60
+12:50:01 | INFO | [BOT] Plan: 60 moves
+12:50:01 | INFO | [MOVE] #1 tile=15-80-20-398487653 type=12 hand=1 pile=197
+12:50:01 | INFO | [MOVE] #2 tile=15-24-60-398487653 type=12 hand=2 pile=196
+12:50:01 | INFO | [MOVE] #3 tile=14-48-40-398487653 type=12 hand=0 pile=195
+12:50:01 | INFO | [MOVE] #4 tile=14-16-60-398487653 type=10 hand=1 pile=194
+12:50:01 | INFO | [MOVE] #5 tile=14-48-100-398487653 type=10 hand=2 pile=193
+12:50:01 | INFO | [MOVE] #6 tile=14-48-80-398487653 type=10 hand=0 pile=192
+12:50:01 | INFO | [MOVE] #7 tile=15-40-60-398487653 type=6 hand=1 pile=191
+12:50:01 | INFO | [MOVE] #8 tile=12-8-50-398487653 type=6 hand=2 pile=190
+12:50:01 | INFO | [MOVE] #9 tile=13-56-110-398487653 type=6 hand=0 pile=189
+12:50:01 | INFO | [MOVE] #10 tile=10-40-143-398487653 type=11 hand=1 pile=188
+12:50:01 | INFO | [MOVE] #11 tile=14-72-110-398487653 type=11 hand=2 pile=187
+12:50:01 | INFO | [MOVE] #12 tile=9-40-140-398487653 type=11 hand=0 pile=186
+12:50:01 | INFO | [MOVE] #13 tile=15-16-80-398487653 type=14 hand=1 pile=185
+12:50:01 | INFO | [MOVE] #14 tile=15-32-80-398487653 type=14 hand=2 pile=184
+12:50:01 | INFO | [MOVE] #15 tile=8-40-138-398487653 type=14 hand=0 pile=183
+12:50:01 | INFO | [MOVE] #16 tile=15-16-100-398487653 type=2 hand=1 pile=182
+12:50:01 | INFO | [MOVE] #17 tile=15-32-100-398487653 type=5 hand=2 pile=181
+12:50:01 | INFO | [MOVE] #18 tile=15-80-40-398487653 type=2 hand=3 pile=180
+12:50:01 | INFO | [MOVE] #19 tile=13-8-70-398487653 type=2 hand=1 pile=179
+12:50:01 | INFO | [MOVE] #20 tile=10-56-143-398487653 type=1 hand=2 pile=178
+12:50:01 | INFO | [MOVE] #21 tile=9-56-140-398487653 type=1 hand=3 pile=177
+12:50:01 | INFO | [MOVE] #22 tile=14-24-90-398487653 type=1 hand=1 pile=176
+12:50:01 | INFO | [MOVE] #23 tile=8-56-138-398487653 type=5 hand=2 pile=175
+12:50:01 | INFO | [MOVE] #24 tile=12-40-110-398487653 type=5 hand=0 pile=174
+12:50:01 | INFO | [MOVE] #25 tile=14-48-20-398487653 type=7 hand=1 pile=173
+12:50:01 | INFO | [MOVE] #26 tile=11-8-50-398487653 type=7 hand=2 pile=172
+12:50:01 | INFO | [MOVE] #27 tile=14-88-30-398487653 type=7 hand=0 pile=171
+12:50:01 | INFO | [MOVE] #28 tile=15-64-20-398487653 type=13 hand=1 pile=170
+12:50:01 | INFO | [MOVE] #29 tile=15-64-40-398487653 type=9 hand=2 pile=169
+12:50:01 | INFO | [MOVE] #30 tile=14-8-10-398487653 type=9 hand=3 pile=168
+12:50:01 | INFO | [MOVE] #31 tile=12-64-110-398487653 type=9 hand=1 pile=167
+12:50:01 | INFO | [MOVE] #32 tile=15-56-60-398487653 type=16 hand=2 pile=166
+12:50:01 | INFO | [MOVE] #33 tile=13-56-30-398487653 type=16 hand=3 pile=165
+12:50:01 | INFO | [MOVE] #34 tile=13-40-10-398487653 type=16 hand=1 pile=164
+12:50:01 | INFO | [MOVE] #35 tile=14-24-10-398487653 type=4 hand=2 pile=163
+12:50:01 | INFO | [MOVE] #36 tile=14-72-10-398487653 type=4 hand=3 pile=162
+12:50:01 | INFO | [MOVE] #37 tile=14-88-90-398487653 type=4 hand=1 pile=161
+12:50:01 | INFO | [MOVE] #38 tile=14-72-30-398487653 type=6 hand=2 pile=160
+12:50:01 | INFO | [MOVE] #39 tile=14-88-10-398487653 type=3 hand=3 pile=159
+12:50:01 | INFO | [MOVE] #40 tile=7-40-135-398487653 type=3 hand=4 pile=158
+12:50:01 | INFO | [MOVE] #41 tile=13-80-20-398487653 type=3 hand=2 pile=157
+12:50:01 | INFO | [MOVE] #42 tile=14-88-110-398487653 type=6 hand=3 pile=156
+12:50:01 | INFO | [MOVE] #43 tile=10-40-30-398487653 type=6 hand=1 pile=155
+12:50:01 | INFO | [MOVE] #44 tile=15-72-60-398487653 type=15 hand=2 pile=154
+12:50:01 | INFO | [MOVE] #45 tile=14-56-60-398487653 type=1 hand=3 pile=153
+12:50:01 | INFO | [MOVE] #46 tile=12-72-20-398487653 type=1 hand=4 pile=152
+12:50:01 | INFO | [MOVE] #47 tile=12-56-30-398487653 type=1 hand=2 pile=151
+12:50:01 | INFO | [MOVE] #48 tile=14-80-60-398487653 type=12 hand=3 pile=150
+12:50:01 | INFO | [MOVE] #49 tile=13-64-60-398487653 type=12 hand=4 pile=149
+12:50:01 | INFO | [MOVE] #50 tile=12-32-10-398487653 type=12 hand=2 pile=148
+12:50:01 | INFO | [MOVE] #51 tile=14-40-60-398487653 type=10 hand=3 pile=147
+12:50:01 | INFO | [MOVE] #52 tile=6-40-133-398487653 type=16 hand=4 pile=146
+12:50:01 | INFO | [MOVE] #53 tile=14-72-90-398487653 type=16 hand=5 pile=145
+12:50:01 | INFO | [MOVE] #54 tile=13-32-60-398487653 type=16 hand=3 pile=144
+12:50:01 | INFO | [MOVE] #55 tile=13-80-100-398487653 type=5 hand=4 pile=143
+12:50:01 | INFO | [MOVE] #56 tile=13-88-50-398487653 type=10 hand=5 pile=142
+12:50:01 | INFO | [MOVE] #57 tile=12-80-90-398487653 type=10 hand=3 pile=141
+12:50:01 | INFO | [MOVE] #58 tile=10-72-50-398487653 type=5 hand=4 pile=140
+12:50:01 | INFO | [MOVE] #59 tile=12-72-70-398487653 type=5 hand=2 pile=139
+12:50:01 | INFO | [MOVE] #60 tile=12-88-70-398487653 type=8 hand=3 pile=138
+12:50:01 | INFO | [BOT] وصل الحد الأقصى 60 خطوة — توقف
+12:50:01 | INFO | blocks_played=60, blocks_in_hand=3
+12:50:01 | INFO | [BOT] انتهى RID=3918726 — لن يُعاد تشغيله
+12:50:10 | INFO | [BOT] موقوف على RID الحالي 3918726 — لن يعاد تشغيله
