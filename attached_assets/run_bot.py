@@ -1,27 +1,54 @@
-import os, sys, json, hashlib, base64, getpass, time, signal, subprocess, threading, atexit
+import os, sys, hashlib, base64, getpass, time, subprocess, threading, atexit
 
 try:
     from cryptography.fernet import Fernet
-    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-    from cryptography.hazmat.primitives import hashes
 except ImportError:
     print("Run: pip install cryptography")
     sys.exit(1)
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 ENC_FILE = os.path.join(_dir, "bot.enc")
-KEYS_FILE = os.path.join(_dir, "bot_keys.json")
+USED_FILE = os.path.join(_dir, ".bot_used")
 SESSION_MINUTES = 30
 
 
-def _derive_key(password: str, salt: bytes) -> bytes:
-    kdf = PBKDF2HMAC(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=salt,
-        iterations=600000,
-    )
-    return base64.urlsafe_b64encode(kdf.derive(password.encode()))
+def _extract_master_key(token: str):
+    padding = 4 - len(token) % 4
+    if padding != 4:
+        token += "=" * padding
+    try:
+        raw = base64.urlsafe_b64decode(token)
+    except Exception:
+        return None
+
+    if len(raw) < 25:
+        return None
+
+    nonce = raw[:16]
+    xored = raw[16:-8]
+    tag = raw[-8:]
+
+    mask = hashlib.pbkdf2_hmac("sha256", nonce, b"camelbot_mask", 1, dklen=len(xored))
+    master_key = bytes(a ^ b for a, b in zip(xored, mask))
+
+    expected_tag = hashlib.sha256(nonce + master_key + b"camelbot_verify").digest()[:8]
+    if tag != expected_tag:
+        return None
+    return master_key
+
+
+def _is_used(token: str) -> bool:
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    if not os.path.exists(USED_FILE):
+        return False
+    with open(USED_FILE) as f:
+        return token_hash in f.read()
+
+
+def _mark_used(token: str):
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    with open(USED_FILE, "a") as f:
+        f.write(token_hash + "\n")
 
 
 def _secure_delete(path):
@@ -40,41 +67,6 @@ def _secure_delete(path):
             pass
 
 
-def _validate_password(password):
-    if not os.path.exists(KEYS_FILE):
-        return None, "bot_keys.json not found"
-
-    with open(KEYS_FILE) as f:
-        data = json.load(f)
-
-    pwd_hash = hashlib.sha256(password.encode()).hexdigest()
-
-    for entry in data["passwords"]:
-        if entry["hash"] == pwd_hash:
-            if entry["used"]:
-                return None, "PASSWORD_USED"
-            entry["used"] = True
-            with open(KEYS_FILE, "w") as f:
-                json.dump(data, f, indent=2)
-            return entry, None
-
-    return None, "INVALID"
-
-
-def _decrypt_bot(entry, password):
-    salt = base64.b64decode(entry["salt"])
-    derived = _derive_key(password, salt)
-
-    pwd_fernet = Fernet(derived)
-    master_key = pwd_fernet.decrypt(base64.b64decode(entry["enc_key"]))
-
-    with open(ENC_FILE, "rb") as f:
-        encrypted_code = f.read()
-
-    bot_fernet = Fernet(master_key)
-    return bot_fernet.decrypt(encrypted_code)
-
-
 def main():
     if not os.path.exists(ENC_FILE):
         print("bot.enc not found!")
@@ -85,25 +77,27 @@ def main():
     print(f"  Session: {SESSION_MINUTES} minutes")
     print(f"{'='*40}\n")
 
-    password = getpass.getpass("Password: ")
+    token = getpass.getpass("Token: ")
 
-    entry, error = _validate_password(password)
+    if _is_used(token):
+        print("\nThis token has already been used!")
+        sys.exit(1)
 
-    if error == "PASSWORD_USED":
-        print("\nThis password has already been used!")
-        sys.exit(1)
-    elif error == "INVALID":
-        print("\nInvalid password!")
-        sys.exit(1)
-    elif error:
-        print(f"\nError: {error}")
+    master_key = _extract_master_key(token)
+    if master_key is None:
+        print("\nInvalid token!")
         sys.exit(1)
 
     try:
-        code = _decrypt_bot(entry, password)
+        with open(ENC_FILE, "rb") as f:
+            encrypted_code = f.read()
+        fernet = Fernet(master_key)
+        code = fernet.decrypt(encrypted_code)
     except Exception:
         print("\nDecryption failed!")
         sys.exit(1)
+
+    _mark_used(token)
 
     tmp_name = f".~_bot_{os.getpid()}.py"
     tmp_path = os.path.join(_dir, tmp_name)
