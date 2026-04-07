@@ -3012,11 +3012,14 @@ class CamelBotAddon:
             if flushed:
                 logger.info(f"[BOT] حُذفت {flushed} حزمة متبقية")
 
-        self._bot_running = False
+        with self._lock:
+            self._halted_rid = self.rid
+            self._bot_running = False
 
         if self.gs:
             hand_sz = self.gs.hand_size()
             logger.info(f"blocks_played={self._step}, blocks_in_hand={hand_sz}")
+            logger.info(f"[BOT] انتهى RID={self.rid} — لن يُعاد تشغيله")
 
     def _build_packet(self, block: dict) -> str:
         return json.dumps(
