@@ -166,9 +166,6 @@ _log_file = os.path.join(_log_dir, "camelbot.log")
 logger = logging.getLogger("CamelBot")
 logger.setLevel(logging.INFO)
 _fmt = logging.Formatter("%(asctime)s | %(levelname)s | %(message)s", datefmt="%H:%M:%S")
-_sh = logging.StreamHandler()
-_sh.setFormatter(_fmt)
-logger.addHandler(_sh)
 _fh = logging.FileHandler(_log_file, encoding="utf-8")
 _fh.setFormatter(_fmt)
 logger.addHandler(_fh)
@@ -420,11 +417,11 @@ def _set_level(pile_blocks: list[dict]) -> None:
         _cew.init_level(pile_blocks)
         _c_engine_ready = True
         logger.info("[C-ENGINE] Level initialized in C engine")
-        print(">>> C ENGINE LOADED SUCCESSFULLY <<<")
+        logger.info(">>> C ENGINE LOADED SUCCESSFULLY <<<")
     except Exception as e:
         _c_engine_ready = False
         logger.warning(f"[C-ENGINE] Failed to init: {e}, falling back to Python")
-        print(">>> C ENGINE FAILED - using Python <<<")
+        logger.warning(">>> C ENGINE FAILED - using Python <<<")
 
 
 # ---- cached wrappers -------------------------------------------------------
@@ -2025,24 +2022,24 @@ def _beam_search(
         if _DBG_DECISION:
             _n_tiles_on = _popcount(pile)
             cleared = _total_tiles - _n_tiles_on - held_size
-            print(f"  [P2] step~{cleared} hs={held_size} heur_pick=t{ix.btype[heur_pick]}(tile{heur_pick}) bt_veto={bt_veto} hf_veto={hf_veto}")
+            logger.debug(f"  [P2] step~{cleared} hs={held_size} heur_pick=t{ix.btype[heur_pick]}(tile{heur_pick}) bt_veto={bt_veto} hf_veto={hf_veto}")
             for s_val, m in top_items[:5]:
                 r_bt_v = next(r for r, mm in reaches_bt if mm == m)
                 r_hf_v = next(r for r, mm in reaches_hf if mm == m)
                 ih = held.get(ix.btype[m], 0)
                 tag = "MATCH" if ih==2 else ("pair" if ih==1 else "new")
-                print(f"    tile{m:3d} t={ix.btype[m]:2d} ({tag}) score={int(s_val):7d} bt={r_bt_v:3d} hf={r_hf_v:3d}")
+                logger.debug(f"    tile{m:3d} t={ix.btype[m]:2d} ({tag}) score={int(s_val):7d} bt={r_bt_v:3d} hf={r_hf_v:3d}")
 
         if bt_veto:
             if _DBG_DECISION:
-                print(f"  -> BT VETO: tile{best_bt[1]} t={ix.btype[best_bt[1]]}")
+                logger.debug(f"  -> BT VETO: tile{best_bt[1]} t={ix.btype[best_bt[1]]}")
             return best_bt[1], "ok"
         if hf_veto and not bt_veto:
             hf_candidate = best_hf[1]
             hf_bt_reach = next(r for r, m in reaches_bt if m == hf_candidate)
             if hf_bt_reach >= heur_reach_bt:
                 if _DBG_DECISION:
-                    print(f"  -> HF VETO: tile{hf_candidate} t={ix.btype[hf_candidate]}")
+                    logger.debug(f"  -> HF VETO: tile{hf_candidate} t={ix.btype[hf_candidate]}")
                 return hf_candidate, "ok"
 
         return heur_pick, "ok"
@@ -2453,7 +2450,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
             c_path, c_trials = _cew.plan(held, held_size, time_limit=time_limit)
             elapsed = _time.time() - t0
             logger.info(f"[C-ENGINE] Best: {len(c_path)} steps in {elapsed:.1f}s ({c_trials} trials)")
-            print(f">>> C ENGINE PLAN: {len(c_path)} steps in {elapsed:.1f}s <<<")
+            logger.info(f">>> C ENGINE PLAN: {len(c_path)} steps in {elapsed:.1f}s <<<")
             if c_path:
                 if len(c_path) > MAX_PLAY_STEPS:
                     logger.info(f"[C-ENGINE] Truncated {len(c_path)} -> {MAX_PLAY_STEPS}")
@@ -2461,7 +2458,7 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
                 return c_path
         except Exception as e:
             logger.warning(f"[C-ENGINE] Error: {e}, falling back to Python")
-            print(f">>> C ENGINE ERROR: {e} <<<")
+            logger.error(f">>> C ENGINE ERROR: {e} <<<")
 
     t0 = _time.time()
 

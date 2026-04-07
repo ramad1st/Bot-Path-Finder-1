@@ -30,15 +30,12 @@ def _try_compile():
         return None
 
     try:
-        print(f"Compiling {lib_name}...")
         if sys.platform == "win32":
             subprocess.check_call([gcc, "-O3", "-shared", "-o", lib_path, src_path, "-lm"])
         else:
             subprocess.check_call([gcc, "-O3", "-march=native", "-shared", "-fPIC", "-o", lib_path, src_path, "-lm", "-lpthread"])
-        print("Done!")
         return lib_path
-    except Exception as e:
-        print(f"Compilation failed: {e}")
+    except Exception:
         return None
 
 
@@ -69,7 +66,7 @@ if _lib_path:
 
         _available = True
     except Exception as e:
-        print(f"Failed to load C engine: {e}")
+        pass
         _lib = None
 
 MAX_TYPES = 20
