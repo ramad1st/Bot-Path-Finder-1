@@ -4,6 +4,10 @@
 #include <math.h>
 #include <time.h>
 
+#ifndef _WIN32
+#include <pthread.h>
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 static double _win_freq = 0;
@@ -25,9 +29,10 @@ static double _get_time_s(void) {
 #define MW 4
 #define MAX_TYPES 20
 #define CMAX_PATH 230
-#define NUM_VARIANTS 30
+#define NUM_VARIANTS 50
 #define BEAM_W 250
 #define BRANCH 30
+#define NUM_THREADS 2
 
 typedef unsigned long long u64;
 typedef struct { u64 w[MW]; } Mask;
@@ -68,10 +73,34 @@ typedef struct {
 
 static Level G;
 
-static int unlock_w[NUM_VARIANTS]={600,800,400,1000,200,900,1200,300,700,500,150,1500,2000,0,0,0,1500,100,50,1800, 550,750,950,1100,350,650,1300,450,850,1600};
-static int avail_w_t[NUM_VARIANTS]={400,600,300,200,100,500,800,150,700,350,50,250,0,2000,0,0,1500,100,1200,200, 450,550,350,250,150,650,900,500,750,1000};
-static int depth_w[NUM_VARIANTS]={200,100,300,400,50,350,500,250,150,600,25,100,0,0,2000,0,0,1000,800,50, 175,225,275,450,75,325,550,125,375,700};
-static int hand_w[NUM_VARIANTS]={400,300,500,600,800,250,200,700,350,150,900,450,0,0,0,2000,100,1000,100,1200, 350,450,550,650,750,200,300,800,500,1100};
+static int unlock_w[NUM_VARIANTS]={
+    600,800,400,1000,200,900,1200,300,700,500,
+    150,1500,2000,0,0,0,1500,100,50,1800,
+    550,750,950,1100,350,650,1300,450,850,1600,
+    3000,100,500,1800,400,700,2500,200,1000,1400,
+    50,900,600,1500,300,800,2000,150,1100,350
+};
+static int avail_w_t[NUM_VARIANTS]={
+    400,600,300,200,100,500,800,150,700,350,
+    50,250,0,2000,0,0,1500,100,1200,200,
+    450,550,350,250,150,650,900,500,750,1000,
+    200,3000,800,100,600,1000,50,1500,400,700,
+    2500,300,500,900,1200,150,350,2000,250,1800
+};
+static int depth_w[NUM_VARIANTS]={
+    200,100,300,400,50,350,500,250,150,600,
+    25,100,0,0,2000,0,0,1000,800,50,
+    175,225,275,450,75,325,550,125,375,700,
+    500,200,3000,50,300,150,100,800,2500,400,
+    600,1500,250,350,700,1000,1800,75,900,2000
+};
+static int hand_w[NUM_VARIANTS]={
+    400,300,500,600,800,250,200,700,350,150,
+    900,450,0,0,0,2000,100,1000,100,1200,
+    350,450,550,650,750,200,300,800,500,1100,
+    100,600,300,3000,500,200,800,400,50,900,
+    1500,250,700,150,1000,2500,350,600,1800,450
+};
 
 void level_init(int n, int *btypes, int *layers, u64 *cb_raw, u64 *cv_raw, int n_types) {
     G.n=n; G.n_types=n_types;
@@ -253,12 +282,15 @@ static double score_move(const Mask *pile, const Hand *h, int i, int variant, in
     return s;
 }
 
-static unsigned int xs;
-static inline void xs_seed(unsigned int s) { xs=s?s:1; }
-static inline unsigned int xs_next(void) { xs^=xs<<13; xs^=xs>>17; xs^=xs<<5; return xs; }
-static inline double xs_gauss(void) {
-    double u1=(xs_next()%1000000+1)/1000001.0;
-    double u2=(xs_next()%1000000+1)/1000001.0;
+typedef struct {
+    unsigned int s;
+} XorShift;
+
+static inline void xsr_seed(XorShift *x, unsigned int s) { x->s=s?s:1; }
+static inline unsigned int xsr_next(XorShift *x) { x->s^=x->s<<13; x->s^=x->s>>17; x->s^=x->s<<5; return x->s; }
+static inline double xsr_gauss(XorShift *x) {
+    double u1=(xsr_next(x)%1000000+1)/1000001.0;
+    double u2=(xsr_next(x)%1000000+1)/1000001.0;
     return sqrt(-2.0*log(u1))*cos(6.283185307179586*u2);
 }
 
@@ -270,11 +302,7 @@ typedef struct {
     int plen;
 } BeamState;
 
-static BeamState beams_a[BEAM_W * BRANCH + 10];
-static BeamState beams_b[BEAM_W * BRANCH + 10];
-
-typedef struct { double sc; int idx; Mask np; Hand nh; int nsz; } Cand;
-static Cand cand_buf[MAX_BLOCKS];
+typedef struct { double sc; int idx; Mask np; Hand nh; } Cand;
 
 static inline double elapsed_since(double t0) {
     return _get_time_s() - t0;
@@ -289,6 +317,99 @@ static int beam_cmp(const void *a, const void *b) {
     return da>db?-1:da<db?1:0;
 }
 
+static int noisy_greedy(Mask pile, Hand hand, int noise, int variant,
+                        int use_smart, int use_relaxed, XorShift *rng,
+                        int *out_path) {
+    Mask p=pile; Hand h=hand;
+    int path[CMAX_PATH]; int plen=0;
+
+    while (plen<CMAX_PATH) {
+        auto_match(&p,&h,path,&plen,use_smart);
+        Mask avail; get_available(&p,&avail);
+        if (mis_zero(&avail)) break;
+        double bs2=-1e30; int bi2=-1; Mask bp; Hand bh;
+        for (int ww=0;ww<MW;ww++) {
+            u64 bits=avail.w[ww];
+            while (bits) {
+                int i=ww*64+__builtin_ctzll(bits);
+                Mask np; Hand nh;
+                double sc=score_move(&p,&h,i,variant,use_relaxed,&np,&nh);
+                if (sc<=-1e17) { bits&=bits-1; continue; }
+                if (noise>0) sc+=xsr_gauss(rng)*noise;
+                if (sc>bs2) { bs2=sc; bi2=i; bp=np; bh=nh; }
+                bits&=bits-1;
+            }
+        }
+        if (bi2<0) break;
+        p=bp; h=bh;
+        if (plen<CMAX_PATH) path[plen++]=bi2;
+    }
+    memcpy(out_path,path,plen*sizeof(int));
+    return plen;
+}
+
+typedef struct {
+    int thread_id;
+    Mask pile;
+    Hand hand;
+    int best_path[CMAX_PATH];
+    int best_len;
+    int trials;
+    double time_limit;
+    double t0;
+    int start_seed;
+    int existing_best_len;
+    int *shared_best_len;
+#ifndef _WIN32
+    pthread_mutex_t *mutex;
+#endif
+} ThreadArg;
+
+static int noise_levels[]={0,50,100,150,200,300,500,800,1000,1500,2000,3000,5000,8000,12000};
+static int n_noise=15;
+
+#ifndef _WIN32
+static void *noisy_search_thread(void *arg) {
+    ThreadArg *ta = (ThreadArg*)arg;
+    ta->best_len = ta->existing_best_len;
+    ta->trials = 0;
+
+    int path[CMAX_PATH];
+    XorShift rng;
+    int tid = ta->thread_id;
+
+    for (int seed=tid; elapsed_since(ta->t0)<ta->time_limit; seed+=NUM_THREADS) {
+        ta->trials++;
+        int ni=seed%n_noise;
+        int noise=noise_levels[ni];
+        int rs=seed/n_noise;
+        xsr_seed(&rng, (unsigned)(rs*137+noise*31+1));
+        int use_smart=rs%2==0;
+        int variant=rs%NUM_VARIANTS;
+        int use_relaxed=rs%4!=0;
+
+        int plen = noisy_greedy(ta->pile, ta->hand, noise, variant,
+                                use_smart, use_relaxed, &rng, path);
+
+        if (plen > ta->best_len) {
+            ta->best_len = plen;
+            memcpy(ta->best_path, path, plen*sizeof(int));
+            pthread_mutex_lock(ta->mutex);
+            if (plen > *ta->shared_best_len) {
+                *ta->shared_best_len = plen;
+            }
+            pthread_mutex_unlock(ta->mutex);
+        }
+
+        pthread_mutex_lock(ta->mutex);
+        int cur_best = *ta->shared_best_len;
+        pthread_mutex_unlock(ta->mutex);
+        if (cur_best >= 225) break;
+    }
+    return NULL;
+}
+#endif
+
 int plan_solution(int *init_held, int init_held_size, double time_limit,
                   int *out_path, int *out_len) {
     _init_timer();
@@ -301,7 +422,19 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
     hand.sz=init_held_size;
 
     int best[CMAX_PATH], blen=0, trials=0;
-    double beam_end=time_limit*0.50, noisy_end=time_limit*0.90, bt_end=time_limit*0.95;
+    double beam_end=time_limit*0.50;
+    double noisy_end=time_limit*0.85;
+    double bt_end=time_limit*0.97;
+
+    BeamState *beams_a = (BeamState*)malloc((BEAM_W*BRANCH+10)*sizeof(BeamState));
+    BeamState *beams_b = (BeamState*)malloc((BEAM_W*BRANCH+10)*sizeof(BeamState));
+    Cand *cand_buf = (Cand*)malloc(MAX_BLOCKS*sizeof(Cand));
+
+    if (!beams_a || !beams_b || !cand_buf) {
+        free(beams_a); free(beams_b); free(cand_buf);
+        *out_len=0;
+        return 0;
+    }
 
     for (int var=0; var<12 && elapsed_since(t0_time)<beam_end; var++) {
         for (int us=0; us<2 && elapsed_since(t0_time)<beam_end; us++) {
@@ -310,6 +443,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
             auto_match(&ip,&ih,ipath,&ipl,us);
 
             if (ipl>blen) { blen=ipl; memcpy(best,ipath,ipl*sizeof(int)); }
+            if (blen>=225) goto done;
 
             beams_a[0].score=0;
             beams_a[0].pile=ip;
@@ -370,6 +504,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                 }
 
                 if (!n_next) break;
+                if (blen>=225) goto done;
 
                 qsort(beams_b,n_next,sizeof(BeamState),beam_cmp);
 
@@ -388,52 +523,73 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                     }
                 }
             }
+            if (blen>=225) goto done;
         }
     }
 
-    int noise_levels[]={0,50,100,150,200,300,500,800,1000,1500,2000,3000,5000,8000,12000};
-    int n_noise=15;
-    for (int seed=0; elapsed_since(t0_time)<noisy_end; seed++) {
-        trials++;
-        int ni=seed%n_noise;
-        int noise=noise_levels[ni];
-        int rs=seed/n_noise;
-        xs_seed((unsigned)(rs*137+noise*31+1));
-        int use_smart=rs%2==0, variant=rs%20, use_relaxed=rs%4!=0;
+    if (blen>=225) goto done;
 
-        Mask p=pile; Hand h=hand;
-        int path[CMAX_PATH]; int plen=0;
+#ifndef _WIN32
+    {
+        pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+        int shared_best = blen;
+        ThreadArg targs[NUM_THREADS];
+        pthread_t threads[NUM_THREADS];
 
-        while (plen<CMAX_PATH) {
-            auto_match(&p,&h,path,&plen,use_smart);
-            Mask avail; get_available(&p,&avail);
-            if (mis_zero(&avail)) break;
-            double bs2=-1e30; int bi2=-1; Mask bp; Hand bh;
-            for (int ww=0;ww<MW;ww++) {
-                u64 bits=avail.w[ww];
-                while (bits) {
-                    int i=ww*64+__builtin_ctzll(bits);
-                    Mask np; Hand nh;
-                    double sc=score_move(&p,&h,i,variant,use_relaxed,&np,&nh);
-                    if (sc<=-1e17) { bits&=bits-1; continue; }
-                    if (noise>0) sc+=xs_gauss()*noise;
-                    if (sc>bs2) { bs2=sc; bi2=i; bp=np; bh=nh; }
-                    bits&=bits-1;
-                }
+        for (int t=0; t<NUM_THREADS; t++) {
+            targs[t].thread_id = t;
+            targs[t].pile = pile;
+            targs[t].hand = hand;
+            targs[t].best_len = 0;
+            targs[t].trials = 0;
+            targs[t].time_limit = noisy_end;
+            targs[t].t0 = t0_time;
+            targs[t].start_seed = t;
+            targs[t].existing_best_len = blen;
+            targs[t].shared_best_len = &shared_best;
+            targs[t].mutex = &mutex;
+            pthread_create(&threads[t], NULL, noisy_search_thread, &targs[t]);
+        }
+
+        for (int t=0; t<NUM_THREADS; t++) {
+            pthread_join(threads[t], NULL);
+            trials += targs[t].trials;
+            if (targs[t].best_len > blen) {
+                blen = targs[t].best_len;
+                memcpy(best, targs[t].best_path, blen*sizeof(int));
             }
-            if (bi2<0) break;
-            p=bp; h=bh;
-            if (plen<CMAX_PATH) path[plen++]=bi2;
         }
-        if (plen>blen) { blen=plen; memcpy(best,path,plen*sizeof(int)); }
+        pthread_mutex_destroy(&mutex);
     }
+#else
+    {
+        XorShift rng;
+        int path[CMAX_PATH];
+        for (int seed=0; elapsed_since(t0_time)<noisy_end; seed++) {
+            trials++;
+            int ni=seed%n_noise;
+            int noise=noise_levels[ni];
+            int rs=seed/n_noise;
+            xsr_seed(&rng,(unsigned)(rs*137+noise*31+1));
+            int use_smart=rs%2==0, variant=rs%NUM_VARIANTS, use_relaxed=rs%4!=0;
+            int plen = noisy_greedy(pile, hand, noise, variant, use_smart, use_relaxed, &rng, path);
+            if (plen>blen) { blen=plen; memcpy(best,path,plen*sizeof(int)); }
+            if (blen>=225) goto done;
+        }
+    }
+#endif
 
-    if (blen>0 && blen<150) {
+    if (blen>=225) goto done;
+
+    if (blen>0 && blen<225) {
+        XorShift rng;
         for (int bt=0; elapsed_since(t0_time)<bt_end; bt++) {
-            xs_seed((unsigned)(bt*31337+7));
-            int bp2=blen-40; if(bp2<0)bp2=0;
-            int rng=blen-5-bp2; if(rng<=0)rng=1;
-            int bpt=bp2+(xs_next()%rng);
+            xsr_seed(&rng,(unsigned)(bt*31337+7));
+
+            int min_bp = blen/4; if(min_bp<0) min_bp=0;
+            int max_bp = blen-3; if(max_bp<min_bp) max_bp=min_bp;
+            int rng_range = max_bp-min_bp+1; if(rng_range<=0) rng_range=1;
+            int bpt = min_bp+(xsr_next(&rng)%rng_range);
 
             Hand h=hand; Mask p=pile; int ok=1;
             for (int s=0;s<bpt&&s<blen;s++) {
@@ -441,6 +597,9 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                 apply_pick(&p,&h,best[s]);
             }
             if (!ok) continue;
+
+            int noise_bt = 500 + (bt%20)*500;
+            int variant_bt = (bt*7)%NUM_VARIANTS;
 
             int path[CMAX_PATH]; memcpy(path,best,bpt*sizeof(int));
             int pl=bpt;
@@ -454,9 +613,9 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                     while (bits) {
                         int i=ww*64+__builtin_ctzll(bits);
                         Mask np; Hand nh;
-                        double sc=score_move(&p,&h,i,bt%20,0,&np,&nh);
+                        double sc=score_move(&p,&h,i,variant_bt,bt%4!=0,&np,&nh);
                         if (sc<=-1e17) { bits&=bits-1; continue; }
-                        sc+=xs_gauss()*3000;
+                        sc+=xsr_gauss(&rng)*noise_bt;
                         if (sc>ts2) { ts2=sc; ti=i; tp=np; th=nh; }
                         bits&=bits-1;
                     }
@@ -465,42 +624,27 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                 p=tp; h=th; if(pl<CMAX_PATH) path[pl++]=ti;
             }
             if (pl>blen) { blen=pl; memcpy(best,path,pl*sizeof(int)); }
+            if (blen>=225) goto done;
         }
     }
 
-    if (blen<150) {
+    if (blen<200) {
+        XorShift rng;
         for (int rs=0; elapsed_since(t0_time)<time_limit; rs++) {
-            xs_seed((unsigned)(rs*54321+99));
+            xsr_seed(&rng,(unsigned)(rs*54321+99));
             int path[CMAX_PATH];
-            Mask p=pile; Hand h=hand; int plen=0;
-            int use_smart=rs%3!=2, variant=rs%20, use_relaxed=rs%4!=0;
+            int use_smart=rs%3!=2, variant=rs%NUM_VARIANTS, use_relaxed=rs%4!=0;
             int noise=1000+rs*100;
-            while (plen<CMAX_PATH) {
-                auto_match(&p,&h,path,&plen,use_smart);
-                Mask avail; get_available(&p,&avail);
-                if (mis_zero(&avail)) break;
-                double bs2=-1e30; int bi2=-1; Mask bp; Hand bh;
-                for (int ww=0;ww<MW;ww++) {
-                    u64 bits=avail.w[ww];
-                    while (bits) {
-                        int i=ww*64+__builtin_ctzll(bits);
-                        Mask np; Hand nh;
-                        double sc=score_move(&p,&h,i,variant,use_relaxed,&np,&nh);
-                        if (sc<=-1e17) { bits&=bits-1; continue; }
-                        sc+=xs_gauss()*noise;
-                        if (sc>bs2) { bs2=sc; bi2=i; bp=np; bh=nh; }
-                        bits&=bits-1;
-                    }
-                }
-                if (bi2<0) break;
-                p=bp; h=bh;
-                if (plen<CMAX_PATH) path[plen++]=bi2;
-            }
+            int plen = noisy_greedy(pile, hand, noise, variant,
+                                    use_smart, use_relaxed, &rng, path);
             if (plen>blen) { blen=plen; memcpy(best,path,plen*sizeof(int)); }
+            if (blen>=225) goto done;
         }
     }
 
+done:
     *out_len=blen;
     memcpy(out_path,best,blen*sizeof(int));
+    free(beams_a); free(beams_b); free(cand_buf);
     return trials;
 }
