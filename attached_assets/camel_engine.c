@@ -29,7 +29,7 @@ static double _get_time_s(void) {
 #define MW 4
 #define MAX_TYPES 20
 #define CMAX_PATH 230
-#define MAX_PLAY 200
+#define MAX_PLAY 225
 #define NUM_VARIANTS 50
 #define BEAM_W 250
 #define BRANCH 30

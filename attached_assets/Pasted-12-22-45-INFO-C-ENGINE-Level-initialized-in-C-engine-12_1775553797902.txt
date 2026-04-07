@@ -1,0 +1,224 @@
+12:22:45 | INFO | [C-ENGINE] Level initialized in C engine
+[12:22:45.178] [C-ENGINE] Level initialized in C engine
+>>> C ENGINE LOADED SUCCESSFULLY <<<
+12:22:45 | INFO | [LEVEL 1] كتل=198 | طبقات=15 | متاحة=26 | RID=3193757
+[12:22:45.180] [LEVEL 1] كتل=198 | طبقات=15 | متاحة=26 | RID=3193757
+12:22:45 | INFO | ==================================================
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+[12:22:45.182] ==================================================
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+12:22:45 | INFO | [BOT] بدء المستوى 1 | RID=3193757
+[12:22:45.189] [BOT] بدء المستوى 1 | RID=3193757
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+12:22:45 | INFO | ==================================================
+[12:22:45.194] ==================================================
+12:22:45 | INFO | [BOT] Pre-planning solution...
+[12:22:45.200] [BOT] Pre-planning solution...
+192.168.0.5:38136 -> WebSocket text message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+12:22:45 | INFO | [C-ENGINE] Best: 20 steps in 0.7s (0 trials)
+[12:22:45.947] [C-ENGINE] Best: 20 steps in 0.7s (0 trials)
+>>> C ENGINE PLAN: 20 steps in 0.7s <<<
+12:22:45 | INFO | [BOT] Plan: 20 moves
+[12:22:45.950] [BOT] Plan: 20 moves
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket text message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+[12:22:49.219][192.168.0.5:38136] Received WebSocket ping from server (payload:
+b'')
+[12:22:49.288][192.168.0.5:38136] Received WebSocket pong from client (payload:
+b'')
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+12:22:49 | WARNING | [BOT] توجد نقلات لكن كلّها رُفضت بالتقييم! إيقاف نهائي لهذا
+ RID=3193757
+[12:22:49.967] [BOT] توجد نقلات لكن كلّها رُفضت بالتقييم! إيقاف نهائي لهذا RID=3
+193757
+12:22:49 | INFO | blocks_played=42, blocks_in_hand=6
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+[12:22:49.971] blocks_played=42, blocks_in_hand=6
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket binary message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+192.168.0.5:38136 -> WebSocket text message -> 47.245.158.118:14501/ws
+192.168.0.5:38136 <- WebSocket text message <- 47.245.158.118:14501/ws
+[12:22:54.199][192.168.0.5:38136] Received WebSocket ping from server (payload:
+b'')
+12:22:54 | INFO | [WS] انغلقت الجلسة
+Error in WebSocket connection to 47.245.158.118:14501: WebSocket Error: ABNORMAL
+_CLOSURE
+
+C:\Users\M\Desktop\camel>

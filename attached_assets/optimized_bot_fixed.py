@@ -2455,6 +2455,9 @@ def _plan_solution(pile, held, held_size, time_limit=8.0):
             logger.info(f"[C-ENGINE] Best: {len(c_path)} steps in {elapsed:.1f}s ({c_trials} trials)")
             print(f">>> C ENGINE PLAN: {len(c_path)} steps in {elapsed:.1f}s <<<")
             if c_path:
+                if len(c_path) > MAX_PLAY_STEPS:
+                    logger.info(f"[C-ENGINE] Truncated {len(c_path)} -> {MAX_PLAY_STEPS}")
+                    c_path = c_path[:MAX_PLAY_STEPS]
                 return c_path
         except Exception as e:
             logger.warning(f"[C-ENGINE] Error: {e}, falling back to Python")
