@@ -11,6 +11,9 @@ ENC_FILE = os.path.join(_dir, "bot.enc")
 USED_FILE = os.path.join(_dir, ".bot_used")
 SESSION_MINUTES = 30
 
+_SHM = "/dev/shm"
+_USE_RAM = os.path.isdir(_SHM)
+
 
 def _extract_master_key(token: str):
     padding = 4 - len(token) % 4
@@ -75,6 +78,8 @@ def main():
     print(f"\n{'='*40}")
     print(f"  CamelBot Protected Launcher")
     print(f"  Session: {SESSION_MINUTES} minutes")
+    if _USE_RAM:
+        print(f"  Mode: RAM-only (no disk write)")
     print(f"{'='*40}\n")
 
     token = getpass.getpass("Token: ")
@@ -99,12 +104,15 @@ def main():
 
     _mark_used(token)
 
-    tmp_name = f".~_bot_{os.getpid()}.py"
-    tmp_path = os.path.join(_dir, tmp_name)
+    rand_id = hashlib.md5(os.urandom(16)).hexdigest()[:8]
+    if _USE_RAM:
+        tmp_path = os.path.join(_SHM, f".cb_{rand_id}.py")
+    else:
+        tmp_path = os.path.join(_dir, f".~_bot_{rand_id}.py")
 
-    with open(tmp_path, "wb") as f:
-        f.write(code)
-    os.chmod(tmp_path, 0o600)
+    fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    os.write(fd, code)
+    os.close(fd)
 
     atexit.register(_secure_delete, tmp_path)
 
