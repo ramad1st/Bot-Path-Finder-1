@@ -129,7 +129,7 @@ _c_engine_ready = False
 def _load_config():
     import json as _json
     _cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
-    _defaults = {"max_play_steps": 60, "beam_width": 16, "time_limit": 8.0}
+    _defaults = {"secret": "11f7257bf19219a61dd1db032b9a7038", "uid": 398487653, "max_play_steps": 60, "beam_width": 16, "time_limit": 8.0}
     try:
         with open(_cfg_path) as _f:
             _cfg = _json.load(_f)
@@ -139,13 +139,13 @@ def _load_config():
 
 _cfg = _load_config()
 
-SECRET       = "11f7257bf19219a61dd1db032b9a7038"
-UID          = 398487653
+SECRET       = str(_cfg["secret"])
+UID          = int(_cfg["uid"])
 SEND_DELAY   = 0
-BEAM_WIDTH   = _cfg["beam_width"]
+BEAM_WIDTH   = int(_cfg["beam_width"])
 SEARCH_DEPTH = 10
-MAX_PLAY_STEPS = _cfg["max_play_steps"]
-_TIME_LIMIT  = _cfg["time_limit"]
+MAX_PLAY_STEPS = int(_cfg["max_play_steps"])
+_TIME_LIMIT  = float(_cfg["time_limit"])
 _scoring_noise = 0.0
 _fast_mode = False
 _tabu_set: set[tuple[int, int]] = set()
