@@ -1,13 +1,16 @@
-import os, sys, hashlib, base64, getpass, time, subprocess, threading, atexit
+import os, sys, json, hashlib, base64, getpass, time, subprocess, threading, atexit
 
 try:
     from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+    from cryptography.hazmat.backends import default_backend
 except ImportError:
     print("Run: pip install cryptography")
     sys.exit(1)
 
 _dir = os.path.dirname(os.path.abspath(__file__))
 ENC_FILE = os.path.join(_dir, "bot.enc")
+KEYS_FILE = os.path.join(_dir, "bot_keys.json")
 USED_FILE = os.path.join(_dir, ".bot_used")
 SESSION_MINUTES = 30
 
@@ -15,43 +18,33 @@ _SHM = "/dev/shm"
 _USE_RAM = os.path.isdir(_SHM)
 
 
-def _extract_master_key(token: str):
-    padding = 4 - len(token) % 4
-    if padding != 4:
-        token += "=" * padding
-    try:
-        raw = base64.urlsafe_b64decode(token)
-    except Exception:
-        return None
-
-    if len(raw) < 25:
-        return None
-
-    nonce = raw[:16]
-    xored = raw[16:-8]
-    tag = raw[-8:]
-
-    mask = hashlib.pbkdf2_hmac("sha256", nonce, b"camelbot_mask", 1, dklen=len(xored))
-    master_key = bytes(a ^ b for a, b in zip(xored, mask))
-
-    expected_tag = hashlib.sha256(nonce + master_key + b"camelbot_verify").digest()[:8]
-    if tag != expected_tag:
-        return None
-    return master_key
+def _code_hash(code: str) -> str:
+    clean = code.strip().upper().replace("-", "")
+    return hashlib.sha256(clean.encode()).hexdigest()
 
 
-def _is_used(token: str) -> bool:
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
+def _decrypt_master_key(blob: str, code: str) -> bytes:
+    clean = code.strip().upper().replace("-", "")
+    raw = base64.b64decode(blob)
+    salt = raw[:16]
+    iv = raw[16:32]
+    ct = raw[32:]
+    dk = hashlib.pbkdf2_hmac("sha256", clean.encode(), salt, 100000)
+    cipher = Cipher(algorithms.AES(dk), modes.CFB(iv), backend=default_backend())
+    dec = cipher.decryptor()
+    return dec.update(ct) + dec.finalize()
+
+
+def _is_used(code_hash: str) -> bool:
     if not os.path.exists(USED_FILE):
         return False
     with open(USED_FILE) as f:
-        return token_hash in f.read()
+        return code_hash in f.read()
 
 
-def _mark_used(token: str):
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
+def _mark_used(code_hash: str):
     with open(USED_FILE, "a") as f:
-        f.write(token_hash + "\n")
+        f.write(code_hash + "\n")
 
 
 def _secure_delete(path):
@@ -75,34 +68,41 @@ def main():
         print("bot.enc not found!")
         sys.exit(1)
 
+    if not os.path.exists(KEYS_FILE):
+        print("bot_keys.json not found!")
+        sys.exit(1)
+
+    with open(KEYS_FILE) as f:
+        keys = json.load(f)
+
     print(f"\n{'='*40}")
     print(f"  CamelBot Protected Launcher")
     print(f"  Session: {SESSION_MINUTES} minutes")
-    if _USE_RAM:
-        print(f"  Mode: RAM-only (no disk write)")
     print(f"{'='*40}\n")
 
-    token = getpass.getpass("Token: ")
+    code = input("Code: ").strip().upper()
 
-    if _is_used(token):
-        print("\nThis token has already been used!")
+    ch = _code_hash(code)
+
+    if _is_used(ch):
+        print("\nThis code has already been used!")
         sys.exit(1)
 
-    master_key = _extract_master_key(token)
-    if master_key is None:
-        print("\nInvalid token!")
+    if ch not in keys:
+        print("\nInvalid code!")
         sys.exit(1)
 
     try:
+        master_key = _decrypt_master_key(keys[ch], code)
         with open(ENC_FILE, "rb") as f:
             encrypted_code = f.read()
         fernet = Fernet(master_key)
-        code = fernet.decrypt(encrypted_code)
+        bot_code = fernet.decrypt(encrypted_code)
     except Exception:
         print("\nDecryption failed!")
         sys.exit(1)
 
-    _mark_used(token)
+    _mark_used(ch)
 
     rand_id = hashlib.md5(os.urandom(16)).hexdigest()[:8]
     if _USE_RAM:
@@ -111,7 +111,7 @@ def main():
         tmp_path = os.path.join(_dir, f".~_bot_{rand_id}.py")
 
     fd = os.open(tmp_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    os.write(fd, code)
+    os.write(fd, bot_code)
     os.close(fd)
 
     atexit.register(_secure_delete, tmp_path)
