@@ -126,12 +126,26 @@ except ImportError:
 
 _c_engine_ready = False
 
+def _load_config():
+    import json as _json
+    _cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+    _defaults = {"max_play_steps": 60, "beam_width": 16, "time_limit": 8.0}
+    try:
+        with open(_cfg_path) as _f:
+            _cfg = _json.load(_f)
+        return {k: _cfg.get(k, v) for k, v in _defaults.items()}
+    except Exception:
+        return _defaults
+
+_cfg = _load_config()
+
 SECRET       = "11f7257bf19219a61dd1db032b9a7038"
 UID          = 398487653
 SEND_DELAY   = 0
-BEAM_WIDTH   = 16
+BEAM_WIDTH   = _cfg["beam_width"]
 SEARCH_DEPTH = 10
-MAX_PLAY_STEPS = 60
+MAX_PLAY_STEPS = _cfg["max_play_steps"]
+_TIME_LIMIT  = _cfg["time_limit"]
 _scoring_noise = 0.0
 _fast_mode = False
 _tabu_set: set[tuple[int, int]] = set()
@@ -2096,7 +2110,9 @@ def _plan_score_move(pile, held, held_size, i, ix, variant=0, relaxed=False):
 _cached_pile_blocks = None
 
 
-def _plan_solution(pile, held, held_size, time_limit=8.0):
+def _plan_solution(pile, held, held_size, time_limit=None):
+    if time_limit is None:
+        time_limit = _TIME_LIMIT
     ix = _level_idx
     if ix is None:
         return []
@@ -2587,7 +2603,7 @@ class CamelBotAddon:
 
             if not planned_moves and self._step == 0:
                 logger.info("[BOT] Pre-planning solution...")
-                planned_moves = _plan_solution(pile, held, held_size, time_limit=8.0)
+                planned_moves = _plan_solution(pile, held, held_size)
                 plan_idx = 0
                 logger.info(f"[BOT] Plan: {len(planned_moves)} moves")
 
@@ -2603,7 +2619,7 @@ class CamelBotAddon:
                     plan_idx += 1
                 else:
                     logger.info(f"[BOT] Plan deviated at step {self._step}, re-planning...")
-                    planned_moves = _plan_solution(pile, held, held_size, time_limit=5.0)
+                    planned_moves = _plan_solution(pile, held, held_size, time_limit=_TIME_LIMIT * 0.625)
                     plan_idx = 0
                     if planned_moves:
                         replan_candidate = planned_moves[0]

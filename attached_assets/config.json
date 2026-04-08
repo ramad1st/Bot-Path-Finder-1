@@ -1,0 +1,6 @@
+{
+    "max_play_steps": 60,
+    "beam_width": 16,
+    "time_limit": 8.0,
+    "session_minutes": 30
+}

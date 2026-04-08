@@ -9,7 +9,17 @@ except ImportError:
 _dir = os.path.dirname(os.path.abspath(__file__))
 ENC_FILE = os.path.join(_dir, "bot.enc")
 USED_FILE = os.path.join(_dir, ".bot_used")
-SESSION_MINUTES = 30
+_CFG_FILE = os.path.join(_dir, "config.json")
+
+def _load_session_minutes():
+    import json
+    try:
+        with open(_CFG_FILE) as f:
+            return json.load(f).get("session_minutes", 30)
+    except Exception:
+        return 30
+
+SESSION_MINUTES = _load_session_minutes()
 
 
 def _extract_master_key(token: str):
