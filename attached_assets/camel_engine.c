@@ -33,7 +33,7 @@ static double _get_time_s(void) {
 #define NUM_VARIANTS 50
 #define BEAM_W 250
 #define BRANCH 30
-#define NUM_THREADS 2
+#define NUM_THREADS 4
 
 typedef unsigned long long u64;
 typedef struct { u64 w[MW]; } Mask;
@@ -379,14 +379,14 @@ static void *noisy_search_thread(void *arg) {
     XorShift rng;
     int tid = ta->thread_id;
 
-    for (int seed=tid; elapsed_since(ta->t0)<ta->time_limit; seed+=NUM_THREADS) {
+    for (int seq=0; elapsed_since(ta->t0)<ta->time_limit; seq++) {
         ta->trials++;
-        int ni=seed%n_noise;
+        int ni=seq%n_noise;
         int noise=noise_levels[ni];
-        int rs=seed/n_noise;
-        xsr_seed(&rng, (unsigned)(rs*137+noise*31+1));
+        int rs=seq/n_noise;
+        xsr_seed(&rng, (unsigned)(rs*137+noise*31+tid*9973+1));
         int use_smart=rs%2==0;
-        int variant=rs%NUM_VARIANTS;
+        int variant=(rs+tid)%NUM_VARIANTS;
         int use_relaxed=rs%4!=0;
 
         int plen = noisy_greedy(ta->pile, ta->hand, noise, variant,
@@ -425,7 +425,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
     int best[CMAX_PATH], blen=0, trials=0;
     double beam_end=time_limit*0.50;
     double noisy_end=time_limit*0.85;
-    double bt_end=time_limit*0.97;
+    double bt_end=time_limit*0.92;
 
     BeamState *beams_a = (BeamState*)malloc((BEAM_W*BRANCH+10)*sizeof(BeamState));
     BeamState *beams_b = (BeamState*)malloc((BEAM_W*BRANCH+10)*sizeof(BeamState));
@@ -592,10 +592,10 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
             int rng_range = max_bp-min_bp+1; if(rng_range<=0) rng_range=1;
             int bpt = min_bp+(xsr_next(&rng)%rng_range);
 
-            Hand h=hand; Mask p=pile; int ok=1;
+            Hand h2=hand; Mask p2=pile; int ok=1;
             for (int s=0;s<bpt&&s<blen;s++) {
-                if (!mtest(&p,best[s])) { ok=0; break; }
-                apply_pick(&p,&h,best[s]);
+                if (!mtest(&p2,best[s])) { ok=0; break; }
+                apply_pick(&p2,&h2,best[s]);
             }
             if (!ok) continue;
 
@@ -604,9 +604,10 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
 
             int path[CMAX_PATH]; memcpy(path,best,bpt*sizeof(int));
             int pl=bpt;
+
             while (pl<CMAX_PATH) {
-                auto_match(&p,&h,path,&pl,bt%2==0);
-                Mask av; get_available(&p,&av);
+                auto_match(&p2,&h2,path,&pl,bt%2==0);
+                Mask av; get_available(&p2,&av);
                 if (mis_zero(&av)) break;
                 double ts2=-1e30; int ti=-1; Mask tp; Hand th;
                 for (int ww=0;ww<MW;ww++) {
@@ -614,7 +615,7 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                     while (bits) {
                         int i=ww*64+__builtin_ctzll(bits);
                         Mask np; Hand nh;
-                        double sc=score_move(&p,&h,i,variant_bt,bt%4!=0,&np,&nh);
+                        double sc=score_move(&p2,&h2,i,variant_bt,bt%4!=0,&np,&nh);
                         if (sc<=-1e17) { bits&=bits-1; continue; }
                         sc+=xsr_gauss(&rng)*noise_bt;
                         if (sc>ts2) { ts2=sc; ti=i; tp=np; th=nh; }
@@ -622,24 +623,81 @@ int plan_solution(int *init_held, int init_held_size, double time_limit,
                     }
                 }
                 if (ti<0) break;
-                p=tp; h=th; if(pl<CMAX_PATH) path[pl++]=ti;
+                p2=tp; h2=th; if(pl<CMAX_PATH) path[pl++]=ti;
             }
             if (pl>blen) { blen=pl; memcpy(best,path,pl*sizeof(int)); }
             if (blen>=MAX_PLAY) goto done;
         }
     }
 
-    if (blen<200) {
-        XorShift rng;
-        for (int rs=0; elapsed_since(t0_time)<time_limit; rs++) {
-            xsr_seed(&rng,(unsigned)(rs*54321+99));
-            int path[CMAX_PATH];
-            int use_smart=rs%3!=2, variant=rs%NUM_VARIANTS, use_relaxed=rs%4!=0;
-            int noise=1000+rs*100;
-            int plen = noisy_greedy(pile, hand, noise, variant,
-                                    use_smart, use_relaxed, &rng, path);
-            if (plen>blen) { blen=plen; memcpy(best,path,plen*sizeof(int)); }
+    if (blen>0 && blen<MAX_PLAY) {
+        for (int back=2; back<=30 && elapsed_since(t0_time)<time_limit; back++) {
+            int replay_to = blen - back;
+            if (replay_to<1) break;
+
+            Hand rh=hand; Mask rp=pile; int rok=1;
+            for (int s=0;s<replay_to;s++) {
+                if (!mtest(&rp,best[s])) { rok=0; break; }
+                apply_pick(&rp,&rh,best[s]);
+            }
+            if (!rok) continue;
+
+            auto_match(&rp,&rh,best,&replay_to,1);
+
+            typedef struct { Mask pile; Hand hand; int path[CMAX_PATH]; int plen; } DNode;
+            DNode *stack = (DNode*)malloc(8000*sizeof(DNode));
+            if (!stack) continue;
+            int sp=0;
+
+            stack[0].pile=rp; stack[0].hand=rh; stack[0].plen=replay_to;
+            memcpy(stack[0].path,best,replay_to*sizeof(int));
+            sp=1;
+
+            int improved=0;
+            while (sp>0 && sp<7990 && elapsed_since(t0_time)<time_limit) {
+                DNode cur=stack[--sp];
+
+                Mask avail; get_available(&cur.pile,&avail);
+                if (mis_zero(&avail)) {
+                    if (cur.plen>blen) { blen=cur.plen; memcpy(best,cur.path,cur.plen*sizeof(int)); improved=1; }
+                    continue;
+                }
+
+                Cand moves[MAX_BLOCKS]; int nm=0;
+                for (int ww=0;ww<MW;ww++) {
+                    u64 bits=avail.w[ww];
+                    while (bits) {
+                        int i=ww*64+__builtin_ctzll(bits);
+                        Mask np; Hand nh;
+                        double sc=score_move(&cur.pile,&cur.hand,i,back*7+cur.plen,1,&np,&nh);
+                        if (sc>-1e17 && nm<MAX_BLOCKS) {
+                            moves[nm].sc=sc; moves[nm].idx=i;
+                            moves[nm].np=np; moves[nm].nh=nh; nm++;
+                        }
+                        bits&=bits-1;
+                    }
+                }
+                if (!nm) {
+                    if (cur.plen>blen) { blen=cur.plen; memcpy(best,cur.path,cur.plen*sizeof(int)); improved=1; }
+                    continue;
+                }
+
+                qsort(moves,nm,sizeof(Cand),cand_cmp);
+                int take=nm<5?nm:5;
+                for (int k=0;k<take && sp<7990;k++) {
+                    DNode *ns=&stack[sp];
+                    ns->pile=moves[k].np; ns->hand=moves[k].nh;
+                    ns->plen=cur.plen;
+                    memcpy(ns->path,cur.path,cur.plen*sizeof(int));
+                    if (ns->plen<CMAX_PATH) ns->path[ns->plen++]=moves[k].idx;
+                    auto_match(&ns->pile,&ns->hand,ns->path,&ns->plen,1);
+                    if (ns->plen>blen) { blen=ns->plen; memcpy(best,ns->path,ns->plen*sizeof(int)); improved=1; }
+                    sp++;
+                }
+            }
+            free(stack);
             if (blen>=MAX_PLAY) goto done;
+            if (improved) back=1;
         }
     }
 
