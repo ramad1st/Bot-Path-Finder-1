@@ -2619,7 +2619,7 @@ class CamelBotAddon:
                     plan_idx += 1
                 else:
                     logger.info(f"[BOT] Plan deviated at step {self._step}, re-planning...")
-                    planned_moves = _plan_solution(pile, held, held_size, time_limit=_TIME_LIMIT * 0.625)
+                    planned_moves = _plan_solution(pile, held, held_size, time_limit=_TIME_LIMIT)
                     plan_idx = 0
                     if planned_moves:
                         replan_candidate = planned_moves[0]
