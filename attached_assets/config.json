@@ -1,7 +1,7 @@
 {
     "secret": "11f7257bf19219a61dd1db032b9a7038",
     "uid": 398487653,
-    "max_play_steps": 60,
+    "max_play_steps": 225,
     "beam_width": 16,
     "time_limit": 8.0
 }
